@@ -7,6 +7,7 @@
         "dev": "vite --host 0.0.0.0 --port 3000",
         "build": "vite build",
         "build:monoform": "node scripts/build-monoform.mjs",
+        "test:bridge": "node --test local-bridge/*.test.mjs",
         "typecheck": "tsc --noEmit",
         "start": "vite preview --host 0.0.0.0 --port 3000",
         "format": "prettier --write .",
