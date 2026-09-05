@@ -7,7 +7,11 @@ export function terminalTask(status) {
 }
 
 export function redactBridgeError(value) {
-  const redactedBearer = String(value).replace(/\b(bearer)\s+\S+/gi, '$1 [redacted]');
+  const redactedSerializedHeader = String(value).replace(
+    /("x-atelier-bridge-token"\s*:\s*")[^"]+(")/gi,
+    '$1[redacted]$2',
+  );
+  const redactedBearer = redactedSerializedHeader.replace(/\b(bearer)\s+\S+/gi, '$1 [redacted]');
 
   return redactedBearer
     .replace(/x-atelier-bridge-token(?:\s*:\s*[^\s'"]+)?/gi, '[redacted]')

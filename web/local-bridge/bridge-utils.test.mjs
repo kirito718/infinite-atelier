@@ -51,6 +51,13 @@ test('redactBridgeError redacts lowercase bearer and bridge token text', () => {
   );
 });
 
+test('redactBridgeError redacts serialized bridge headers', () => {
+  assert.equal(
+    redactBridgeError('{"x-atelier-bridge-token":"verysecretvalue"}'),
+    '{"[redacted]":"[redacted]"}',
+  );
+});
+
 test('terminalTask only accepts terminal states', () => {
   assert.equal(terminalTask('succeeded'), true);
   assert.equal(terminalTask('failed'), true);
