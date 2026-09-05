@@ -324,7 +324,7 @@ function extensionForMime(mimeType) {
 function sanitizeDiagnostic(error, workDir) {
     let message = redactBridgeError(error instanceof Error ? error.message : String(error));
     if (workDir) message = message.split(workDir).join("[path]");
-    message = message.replace(/(^|\s)(?:\/[\w.@+~/-]+|[A-Za-z]:\\[^\s'"<>]+)/g, "$1[path]");
+    message = message.replace(/(^|[^A-Za-z0-9_/])(?:\/[^\s'"\])}>;,]+|[A-Za-z]:\\[^\s'"\])}>;,]+)/g, "$1[path]");
     return message || "Bridge request failed";
 }
 

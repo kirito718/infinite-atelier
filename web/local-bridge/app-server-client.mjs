@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { readFile } from "node:fs/promises";
-import { basename, extname } from "node:path";
+import { basename, extname, isAbsolute, relative, resolve } from "node:path";
 import { createInterface } from "node:readline";
 
 import { redactBridgeError } from "./bridge-utils.mjs";
@@ -82,7 +82,7 @@ export class CodexAppServerClient extends EventEmitter {
         const turnId = turnResult?.turn?.id;
         if (!turnId) throw new Error("Codex did not return a turn id");
 
-        return this.waitForTurn({ threadId, turnId, signal });
+        return this.waitForTurn({ threadId, turnId, workDir, signal });
     }
 
     async cancel({ threadId, turnId }) {
@@ -174,22 +174,22 @@ export class CodexAppServerClient extends EventEmitter {
 
         if (method === "item/completed" && params.item?.type === "imageGeneration") {
             const key = turnKey(params.threadId, params.turnId);
-            const turn = this.turns.get(key) ?? this.earlyTurns.get(key) ?? { filePromises: [] };
-            turn.filePromises.push(readImageItem(params.item));
+            const turn = this.turns.get(key) ?? this.earlyTurns.get(key) ?? { imageItems: [] };
+            turn.imageItems.push(params.item);
             if (!this.turns.has(key)) this.earlyTurns.set(key, turn);
             return;
         }
 
         if (method === "turn/completed") {
             const key = turnKey(params.threadId, params.turn?.id);
-            const turn = this.turns.get(key) ?? this.earlyTurns.get(key) ?? { filePromises: [] };
+            const turn = this.turns.get(key) ?? this.earlyTurns.get(key) ?? { imageItems: [] };
             turn.completed = params.turn;
             if (this.turns.has(key)) this.finishTurn(key, turn);
             else this.earlyTurns.set(key, turn);
         }
     }
 
-    waitForTurn({ threadId, turnId, signal }) {
+    waitForTurn({ threadId, turnId, workDir, signal }) {
         const key = turnKey(threadId, turnId);
         return new Promise((resolve, reject) => {
             const abort = () => {
@@ -203,11 +203,12 @@ export class CodexAppServerClient extends EventEmitter {
                 return;
             }
             signal?.addEventListener("abort", abort, { once: true });
-            const turn = this.earlyTurns.get(key) ?? { filePromises: [] };
+            const turn = this.earlyTurns.get(key) ?? { imageItems: [] };
             this.earlyTurns.delete(key);
             Object.assign(turn, {
                 resolve,
                 reject,
+                workDir,
                 removeAbortListener: () => signal?.removeEventListener("abort", abort),
             });
             this.turns.set(key, turn);
@@ -220,7 +221,7 @@ export class CodexAppServerClient extends EventEmitter {
         this.earlyTurns.delete(key);
         turn.removeAbortListener();
         if (turn.completed.status === "completed") {
-            Promise.all(turn.filePromises).then(
+            Promise.all(turn.imageItems.map((item) => readImageItem(item, turn.workDir))).then(
                 (files) => turn.resolve({ files: files.filter(Boolean) }),
                 (error) => turn.reject(bridgeError(error)),
             );
@@ -259,15 +260,26 @@ export function parseJsonRpcLine(line) {
     return value;
 }
 
-async function readImageItem(item) {
+async function readImageItem(item, workDir) {
     const data = decodeImageData(item.result);
     if (data) return { ...data, name: `generated-${item.id}${extensionForImageMime(data.mimeType)}` };
     if (!item.savedPath) throw new Error("Codex image result did not include image data");
+    if (!isContained(workDir, item.savedPath)) {
+        throw new Error("Codex saved image path is outside the task directory");
+    }
     return {
         bytes: await readFile(item.savedPath),
         mimeType: mimeTypeForPath(item.savedPath),
         name: basename(item.savedPath),
     };
+}
+
+function isContained(directory, path) {
+    if (typeof directory !== "string" || typeof path !== "string" || !isAbsolute(directory) || !isAbsolute(path)) {
+        return false;
+    }
+    const rel = relative(resolve(directory), resolve(path));
+    return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
 }
 
 function decodeImageData(value) {

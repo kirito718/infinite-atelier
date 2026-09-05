@@ -1,10 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { access, readFile, writeFile } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { constants } from "node:fs";
+import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { PassThrough } from "node:stream";
 
 import { requireBridgeRequest } from "./bridge-utils.mjs";
@@ -81,6 +82,83 @@ test("Codex client interrupts the active image turn when cancelled", async () =>
     await client.close();
 });
 
+test("Codex client logout sends account/logout", async () => {
+    const process = createFakeAppServerProcess();
+    const client = new CodexAppServerClient({ spawnProcess: () => process });
+
+    await client.logout();
+
+    const logout = process.messages.find((message) => message.method === "account/logout");
+    assert.deepEqual(logout, { id: 2, method: "account/logout" });
+    await client.close();
+});
+
+test("Codex client rejects saved image paths outside the task directory", async () => {
+    const taskDir = await mkdtemp(join(tmpdir(), "atelier-client-task-"));
+    const siblingDir = await mkdtemp(join(tmpdir(), "atelier-client-sibling-"));
+    const outsidePath = join(siblingDir, "private.png");
+    await writeFile(outsidePath, PNG_BYTES);
+    const traversalPath = join(taskDir, "..", basename(siblingDir), "private.png");
+
+    try {
+        for (const savedPath of [outsidePath, traversalPath]) {
+            const process = createFakeAppServerProcess({
+                imageItem: {
+                    type: "imageGeneration",
+                    id: "image-1",
+                    status: "completed",
+                    revisedPrompt: null,
+                    result: "",
+                    savedPath,
+                    failure: null,
+                },
+            });
+            const client = new CodexAppServerClient({ spawnProcess: () => process });
+
+            await assert.rejects(client.generateImage({ prompt: "Private image", references: [], workDir: taskDir }), /task directory/);
+            await client.close();
+        }
+    } finally {
+        await rm(taskDir, { recursive: true, force: true });
+        await rm(siblingDir, { recursive: true, force: true });
+    }
+});
+
+test("bridge does not stage or serve an out-of-task Codex saved path", async () => {
+    const siblingDir = await mkdtemp(join(tmpdir(), "atelier-client-sibling-"));
+    const outsidePath = join(siblingDir, "private.png");
+    await writeFile(outsidePath, PNG_BYTES);
+    const process = createFakeAppServerProcess({
+        imageItem: {
+            type: "imageGeneration",
+            id: "image-1",
+            status: "completed",
+            revisedPrompt: null,
+            result: "",
+            savedPath: outsidePath,
+            failure: null,
+        },
+    });
+    const codex = new CodexAppServerClient({ spawnProcess: () => process });
+
+    try {
+        await withServer(codex, async ({ request }) => {
+            const created = await request("/v1/images", {
+                method: "POST",
+                body: JSON.stringify({ operation: "generate", prompt: "Private image", references: [] }),
+            });
+            const { taskId } = await created.json();
+            const task = await waitForTask(request, taskId, "failed");
+
+            assert.deepEqual(task.files, []);
+            assert.equal(JSON.stringify(task).includes(outsidePath), false);
+            assert.equal((await request(`/v1/images/${taskId}/files/00000000-0000-0000-0000-000000000000`)).status, 404);
+        });
+    } finally {
+        await rm(siblingDir, { recursive: true, force: true });
+    }
+});
+
 test("status endpoint reports the Codex connection state", async () => {
     await withServer({ status: "connected" }, async ({ request }) => {
         const response = await request("/v1/status");
@@ -109,6 +187,15 @@ test("bridge endpoints reject requests without a token and non-loopback peers", 
             ),
         /Unauthorized local bridge request/,
     );
+});
+
+test("unauthorized image POST is rejected without consuming its request body", { timeout: 500 }, async () => {
+    await withServer({ status: "disconnected" }, async ({ baseUrl }) => {
+        const response = await postHeadersWithoutBody(baseUrl, "/v1/images");
+
+        assert.equal(response.status, 401);
+        assert.deepEqual(response.body, { error: "Unauthorized local bridge request" });
+    });
 });
 
 test("creates an image task, decodes references, and exposes contained metadata", async () => {
@@ -173,6 +260,34 @@ test("downloads a generated image by its opaque file id", async () => {
     });
 });
 
+test("successful image task and file expire after the configured TTL", async () => {
+    const codex = {
+        status: "connected",
+        async generateImage() {
+            return { files: [{ bytes: PNG_BYTES, mimeType: "image/png", name: "result.png" }] };
+        },
+    };
+
+    await withServer(
+        codex,
+        async ({ request }) => {
+            const created = await request("/v1/images", {
+                method: "POST",
+                body: JSON.stringify({ operation: "generate", prompt: "A copper fox", references: [] }),
+            });
+            const { taskId } = await created.json();
+            const task = await waitForTask(request, taskId, "succeeded");
+            const fileUrl = task.files[0].url;
+
+            await new Promise((resolve) => setTimeout(resolve, 150));
+
+            assert.equal((await request(`/v1/images/${taskId}`)).status, 404);
+            assert.equal((await request(fileUrl)).status, 404);
+        },
+        { cleanupMs: 100 },
+    );
+});
+
 test("rejects video operations before creating a task", async () => {
     await withServer({ status: "connected" }, async ({ request }) => {
         const response = await request("/v1/images", {
@@ -192,7 +307,7 @@ test("cleans task files after failure and redacts diagnostics", async () => {
         async generateImage(options) {
             workDir = options.workDir;
             await writeFile(join(workDir, "partial.png"), PNG_BYTES);
-            throw new Error(`Bearer eyJsecret.token.value failed at ${workDir}/partial.png`);
+            throw new Error("Bearer eyJsecret.token.value failed at '/Users/example/private/file.png' and [/Volumes/private/raw.png]");
         },
     };
 
@@ -206,6 +321,8 @@ test("cleans task files after failure and redacts diagnostics", async () => {
 
         assert.equal(task.error.includes("eyJsecret"), false);
         assert.equal(task.error.includes(workDir), false);
+        assert.equal(task.error.includes("/Users/example/private/file.png"), false);
+        assert.equal(task.error.includes("/Volumes/private/raw.png"), false);
         assert.match(task.error, /\[redacted\]/);
         await assert.rejects(access(workDir, constants.F_OK), { code: "ENOENT" });
     });
@@ -288,8 +405,8 @@ test("starts ChatGPT login and logs out through Codex", async () => {
     });
 });
 
-async function withServer(codex, callback) {
-    const server = createBridgeServer({ secret: SECRET, codex, cleanupMs: 50 });
+async function withServer(codex, callback, { cleanupMs = 50 } = {}) {
+    const server = createBridgeServer({ secret: SECRET, codex, cleanupMs });
     await new Promise((resolve, reject) => {
         server.once("error", reject);
         server.listen(0, "127.0.0.1", resolve);
@@ -324,7 +441,7 @@ async function waitForTask(request, taskId, expectedStatus) {
     assert.fail(`Task ${taskId} did not reach ${expectedStatus}`);
 }
 
-function createFakeAppServerProcess({ completeTurn = true } = {}) {
+function createFakeAppServerProcess({ completeTurn = true, imageItem } = {}) {
     const child = new EventEmitter();
     child.stdin = new PassThrough();
     child.stdout = new PassThrough();
@@ -359,6 +476,8 @@ function createFakeAppServerProcess({ completeTurn = true } = {}) {
                         authUrl: "https://chatgpt.com/auth/test",
                     },
                 });
+            } else if (message.method === "account/logout") {
+                respond({ id: message.id, result: {} });
             } else if (message.method === "thread/start") {
                 respond({ id: message.id, result: { thread: { id: "thread-1" } } });
             } else if (message.method === "turn/start") {
@@ -379,7 +498,7 @@ function createFakeAppServerProcess({ completeTurn = true } = {}) {
                         params: {
                             threadId: "thread-1",
                             turnId: "turn-1",
-                            item: {
+                            item: imageItem ?? {
                                 type: "imageGeneration",
                                 id: "image-1",
                                 status: "completed",
@@ -400,6 +519,8 @@ function createFakeAppServerProcess({ completeTurn = true } = {}) {
                 child.stdout.write(`${messages.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
             } else if (message.method === "turn/interrupt") {
                 respond({ id: message.id, result: {} });
+            } else {
+                respond({ id: message.id, error: { code: -32601, message: "Unknown method" } });
             }
         }
     });
@@ -417,4 +538,27 @@ async function waitUntil(predicate) {
         await new Promise((resolve) => setTimeout(resolve, 5));
     }
     assert.fail("Condition was not reached");
+}
+
+function postHeadersWithoutBody(baseUrl, path) {
+    return new Promise((resolve, reject) => {
+        const url = new URL(path, baseUrl);
+        const request = httpRequest(
+            url,
+            {
+                method: "POST",
+                headers: { "content-type": "application/json", "content-length": "1" },
+            },
+            (response) => {
+                const chunks = [];
+                response.on("data", (chunk) => chunks.push(chunk));
+                response.on("end", () => {
+                    request.destroy();
+                    resolve({ status: response.statusCode, body: JSON.parse(Buffer.concat(chunks)) });
+                });
+            },
+        );
+        request.once("error", reject);
+        request.flushHeaders();
+    });
 }
