@@ -13,6 +13,7 @@ web/dist
 # Local development and visual-test artifacts
 .learnings/
 .workbuddy/
+.worktrees/
 web/.fix-tmp/
 web/.playwright-cli/
 web/output/
