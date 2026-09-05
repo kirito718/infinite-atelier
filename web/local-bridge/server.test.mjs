@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { constants } from "node:fs";
 import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
@@ -124,6 +124,35 @@ test("Codex client rejects saved image paths outside the task directory", async 
     }
 });
 
+test("Codex client rejects an in-task savedPath symlink to an outside image", async () => {
+    const taskDir = await mkdtemp(join(tmpdir(), "atelier-client-task-"));
+    const siblingDir = await mkdtemp(join(tmpdir(), "atelier-client-sibling-"));
+    const outsidePath = join(siblingDir, "private.png");
+    const symlinkPath = join(taskDir, "linked.png");
+    await writeFile(outsidePath, PNG_BYTES);
+    await symlink(outsidePath, symlinkPath);
+    const process = createFakeAppServerProcess({
+        imageItem: {
+            type: "imageGeneration",
+            id: "image-1",
+            status: "completed",
+            revisedPrompt: null,
+            result: "",
+            savedPath: symlinkPath,
+            failure: null,
+        },
+    });
+    const client = new CodexAppServerClient({ spawnProcess: () => process });
+
+    try {
+        await assert.rejects(client.generateImage({ prompt: "Private image", references: [], workDir: taskDir }), /task directory/);
+    } finally {
+        await client.close();
+        await rm(taskDir, { recursive: true, force: true });
+        await rm(siblingDir, { recursive: true, force: true });
+    }
+});
+
 test("bridge does not stage or serve an out-of-task Codex saved path", async () => {
     const siblingDir = await mkdtemp(join(tmpdir(), "atelier-client-sibling-"));
     const outsidePath = join(siblingDir, "private.png");
@@ -154,6 +183,41 @@ test("bridge does not stage or serve an out-of-task Codex saved path", async () 
             assert.equal(JSON.stringify(task).includes(outsidePath), false);
             assert.equal((await request(`/v1/images/${taskId}/files/00000000-0000-0000-0000-000000000000`)).status, 404);
         });
+    } finally {
+        await rm(siblingDir, { recursive: true, force: true });
+    }
+});
+
+test("bridge does not stage or serve an in-task symlink to an outside image", async () => {
+    const siblingDir = await mkdtemp(join(tmpdir(), "atelier-server-sibling-"));
+    const outsidePath = join(siblingDir, "private.png");
+    await writeFile(outsidePath, PNG_BYTES);
+    const codex = {
+        status: "connected",
+        async generateImage({ workDir }) {
+            const symlinkPath = join(workDir, "linked.png");
+            await symlink(outsidePath, symlinkPath);
+            return { files: [{ path: symlinkPath, mimeType: "image/png", name: "linked.png" }] };
+        },
+    };
+
+    try {
+        await withServer(
+            codex,
+            async ({ request }) => {
+                const created = await request("/v1/images", {
+                    method: "POST",
+                    body: JSON.stringify({ operation: "generate", prompt: "Private image", references: [] }),
+                });
+                const { taskId } = await created.json();
+                const task = await waitForTerminalTask(request, taskId);
+
+                assert.equal(task.status, "failed");
+                assert.deepEqual(task.files, []);
+                assert.equal((await request(`/v1/images/${taskId}/files/00000000-0000-0000-0000-000000000000`)).status, 404);
+            },
+            { cleanupMs: 1_000 },
+        );
     } finally {
         await rm(siblingDir, { recursive: true, force: true });
     }
@@ -439,6 +503,17 @@ async function waitForTask(request, taskId, expectedStatus) {
         await new Promise((resolve) => setTimeout(resolve, 10));
     }
     assert.fail(`Task ${taskId} did not reach ${expectedStatus}`);
+}
+
+async function waitForTerminalTask(request, taskId) {
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+        const response = await request(`/v1/images/${taskId}`);
+        assert.equal(response.status, 200);
+        const task = await response.json();
+        if (["succeeded", "failed", "cancelled"].includes(task.status)) return task;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.fail(`Task ${taskId} did not reach a terminal state`);
 }
 
 function createFakeAppServerProcess({ completeTurn = true, imageItem } = {}) {

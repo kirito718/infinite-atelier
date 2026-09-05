@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { readFile } from "node:fs/promises";
+import { readFile, realpath } from "node:fs/promises";
 import { basename, extname, isAbsolute, relative, resolve } from "node:path";
 import { createInterface } from "node:readline";
 
@@ -267,11 +267,20 @@ async function readImageItem(item, workDir) {
     if (!isContained(workDir, item.savedPath)) {
         throw new Error("Codex saved image path is outside the task directory");
     }
+    const containedPath = await requireContainedRealPath(workDir, item.savedPath);
     return {
-        bytes: await readFile(item.savedPath),
+        bytes: await readFile(containedPath),
         mimeType: mimeTypeForPath(item.savedPath),
         name: basename(item.savedPath),
     };
+}
+
+async function requireContainedRealPath(directory, path) {
+    const [realDirectory, realPath] = await Promise.all([realpath(directory), realpath(path)]);
+    if (!isContained(realDirectory, realPath)) {
+        throw new Error("Codex saved image path is outside the task directory");
+    }
+    return realPath;
 }
 
 function isContained(directory, path) {

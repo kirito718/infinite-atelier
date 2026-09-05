@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -239,9 +239,18 @@ async function containedOutputBytes(candidate, workDir) {
     if (Buffer.isBuffer(candidate.bytes)) return candidate.bytes;
     if (candidate.bytes instanceof Uint8Array) return Buffer.from(candidate.bytes);
     if (typeof candidate.path === "string" && isContained(workDir, candidate.path)) {
-        return readFile(candidate.path);
+        const containedPath = await requireContainedRealPath(workDir, candidate.path);
+        return readFile(containedPath);
     }
     throw new Error("Codex image output was not task-contained");
+}
+
+async function requireContainedRealPath(directory, path) {
+    const [realDirectory, realPath] = await Promise.all([realpath(directory), realpath(path)]);
+    if (!isContained(realDirectory, realPath)) {
+        throw new Error("Codex image output was not task-contained");
+    }
+    return realPath;
 }
 
 function publicTask(task) {
