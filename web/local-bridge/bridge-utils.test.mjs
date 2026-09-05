@@ -15,10 +15,39 @@ test('requireBridgeRequest rejects non-secret local requests', () => {
   );
 });
 
+test('requireBridgeRequest rejects missing or empty bridge credentials', () => {
+  assert.throws(
+    () =>
+      requireBridgeRequest(
+        { headers: {}, socket: { remoteAddress: '127.0.0.1' } },
+        undefined,
+      ),
+    /Unauthorized local bridge request/,
+  );
+
+  assert.throws(
+    () =>
+      requireBridgeRequest(
+        { headers: { 'x-atelier-bridge-token': '' }, socket: { remoteAddress: '127.0.0.1' } },
+        '',
+      ),
+    /Unauthorized local bridge request/,
+  );
+});
+
 test('redactBridgeError redacts bearer tokens', () => {
   assert.equal(
     redactBridgeError('request failed Bearer eyJhbGciOiJIUzI1NiJ9.payload.signature'),
     'request failed Bearer [redacted]',
+  );
+});
+
+test('redactBridgeError redacts lowercase bearer and bridge token text', () => {
+  assert.equal(
+    redactBridgeError(
+      'request failed bearer eyJhbGciOiJIUzI1NiJ9.payload.signature x-atelier-bridge-token: secret',
+    ),
+    'request failed bearer [redacted] [redacted]',
   );
 });
 
