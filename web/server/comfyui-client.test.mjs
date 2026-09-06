@@ -337,3 +337,28 @@ function unavailableFetch() {
 function unavailableWebSocket() {
     throw new Error("WebSocket should not be created");
 }
+
+test("rejects traversal and URL-control characters in the configured API prefix", () => {
+    for (const apiPrefix of ["../api", "api/..", "api/%2e%2e", "api?target=evil", "api#evil", "api\\..", "api//jobs"]) {
+        assert.throws(() => createComfyUiClient({ baseUrl: "http://comfyui:8188", apiPrefix }), { code: "COMFYUI_URL_INVALID" });
+    }
+});
+
+test("can explicitly disable WebSocket monitoring so the job layer uses history polling", () => {
+    const client = createComfyUiClient({ baseUrl: "http://comfyui:8188", websocketEnabled: false });
+    assert.equal(typeof client.waitForCompletion, "undefined");
+});
+
+test("consumes a cancellation response body under the same request timeout", async () => {
+    const client = createComfyUiClient({ baseUrl: "http://comfyui:8188", timeoutMs: 10, fetchImpl: async () => ({ ok: true, status: 200, headers: new Headers({ "content-type": "application/json" }), arrayBuffer: () => new Promise(() => {}) }) });
+    await assert.rejects(client.interrupt("prompt-1"), (error) => error.name === "TimeoutError");
+});
+
+test("surfaces correlated execution errors immediately and ignores other prompts' failures", async () => {
+    const socket = new WebSocketDouble();
+    const client = createComfyUiClient({ baseUrl: "http://comfyui:8188", websocketFactory: () => socket, timeoutMs: 30 });
+    const pending = client.waitForCompletion({ clientId: "client-1", promptId: "prompt-1" });
+    socket.emit("message", { type: "execution_error", data: { prompt_id: "other", node_id: "18", exception_message: "other failure" } });
+    socket.emit("message", { type: "execution_error", data: { prompt_id: "prompt-1", node_id: "18", exception_message: "CUDA out of memory" } });
+    await assert.rejects(pending, (error) => error.code === "COMFYUI_EXECUTION_FAILED");
+});

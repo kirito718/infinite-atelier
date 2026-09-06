@@ -4,10 +4,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
 import { createCodexSubscriptionApi } from "./server/codex-subscription-api.mjs";
-import { createComfyUiApi } from "./server/comfyui-api.mjs";
-import { createComfyUiClient } from "./server/comfyui-client.mjs";
-import { createComfyUiTaskStore } from "./server/comfyui-task-store.mjs";
-import { createWorkflowRegistry, DEFAULT_WORKFLOW_MANIFESTS } from "./server/comfyui-workflows.mjs";
+import { createConfiguredComfyUiApi } from "./server/comfyui-gateway.mjs";
 import { defineConfig, type Plugin } from "vite";
 
 const webDir = dirname(fileURLToPath(import.meta.url));
@@ -107,26 +104,14 @@ export function codexSubscriptionApiPlugin({ createApi = createCodexSubscription
     };
 }
 
-export function comfyuiApiPlugin({ createApi = createComfyUiApi }: { createApi?: typeof createComfyUiApi } = {}): Plugin {
-    let api: ReturnType<typeof createComfyUiApi> | undefined;
+export function comfyuiApiPlugin({ createApi = createConfiguredComfyUiApi }: { createApi?: typeof createConfiguredComfyUiApi } = {}): Plugin {
+    let api: ReturnType<typeof createConfiguredComfyUiApi> | undefined;
     let initializationError: Error | undefined;
 
     const getApi = () => {
         if (api || initializationError) return api;
         try {
-            const baseUrl = process.env.COMFYUI_BASE_URL?.trim();
-            if (!baseUrl) throw new Error("COMFYUI_BASE_URL is not configured");
-
-            const ttlMs = readPositiveEnv("COMFYUI_TASK_TTL_MS", 10 * 60 * 1000);
-            const maxBytes = readPositiveEnv("COMFYUI_MAX_BYTES", undefined);
-            const registry = createWorkflowRegistry({ directory: resolve(webDir, "server/workflows"), manifests: DEFAULT_WORKFLOW_MANIFESTS });
-            const client = (createComfyUiClient as any)({
-                baseUrl,
-                apiPrefix: process.env.COMFYUI_API_PREFIX || "",
-                fetchImpl: globalThis.fetch,
-            });
-            const store = createComfyUiTaskStore({ ttlMs });
-            api = (createApi as any)({ client, registry, store, ...(maxBytes === undefined ? {} : { maxBytes }) });
+            api = createApi();
             return api;
         } catch (error) {
             initializationError = error instanceof Error ? error : new Error(String(error));
@@ -144,10 +129,10 @@ export function comfyuiApiPlugin({ createApi = createComfyUiApi }: { createApi?:
             sendComfyUiUnavailable(response, initializationError);
             return;
         }
-        void resolvedApi.handle(request, response).catch((error) => {
+        void resolvedApi.handle(request, response).catch(() => {
             if (response.headersSent) return;
-            response.statusCode = 500;
-            response.end(error instanceof Error ? error.message : String(error));
+            response.writeHead(500, { "content-type": "application/json", "cache-control": "no-store" });
+            response.end(JSON.stringify({ error: { code: "COMFYUI_INTERNAL_ERROR", message: "ComfyUI 网关处理失败，请检查服务端日志", retryable: true } }));
         });
     };
 
@@ -167,16 +152,8 @@ function isComfyUiRoute(url: string | undefined) {
     return /^\/api\/comfyui(?:\/|$)/.test(url || "");
 }
 
-function readPositiveEnv(name: string, fallback: number | undefined) {
-    const value = process.env[name]?.trim();
-    if (!value) return fallback;
-    const parsed = Number(value);
-    if (!Number.isFinite(parsed) || parsed <= 0) throw new Error(`${name} must be a positive number`);
-    return parsed;
-}
-
 function sendComfyUiUnavailable(response: import("node:http").ServerResponse, cause?: Error) {
-    const message = cause?.message === "COMFYUI_BASE_URL is not configured" ? "ComfyUI gateway is not configured" : `ComfyUI gateway is unavailable: ${cause?.message || "configuration failed"}`;
+    const message = cause?.message === "COMFYUI_BASE_URL is not configured" ? "ComfyUI 尚未配置，请在服务器设置 COMFYUI_BASE_URL" : "ComfyUI 网关配置不可用，请检查服务端配置与工作流";
     const payload = Buffer.from(JSON.stringify({ error: { code: "COMFYUI_UNAVAILABLE", message, retryable: true } }));
     response.writeHead(503, {
         "content-type": "application/json; charset=utf-8",

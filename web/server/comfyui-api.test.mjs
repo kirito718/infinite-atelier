@@ -332,7 +332,7 @@ function createTestApi(client, options = {}) {
             fields: { workflowId: "portrait-pose-depth", prompt: "portrait", shotId: "shot-1", frame: "0", width: "1", height: "1" },
             files: { pose: imagePart(), depth: imagePart() },
         }));
-    return createComfyUiApi({ client, registry, store, parseMultipart, maxBytes: 10 * 1024 * 1024 });
+    return createComfyUiApi({ client, registry, store, parseMultipart, maxBytes: 10 * 1024 * 1024, historyPollMs: options.historyPollMs ?? 25 });
 }
 
 function createFakeClient({ waiting = Promise.resolve(), uploadImage, queuePrompt, getOutput } = {}) {
@@ -356,6 +356,7 @@ function createFakeClient({ waiting = Promise.resolve(), uploadImage, queuePromp
         },
         async getHistory() {
             calls.push({ method: "getHistory" });
+            await waiting; // history is not complete until the simulated execution finishes
             return { "prompt-1": { outputs: { 21: { images: [{ filename: "result.png", type: "output" }] } } } };
         },
         async getOutput() {
@@ -415,3 +416,134 @@ async function waitForPromptId(request, taskId) {
     }
     assert.fail(`task ${taskId} did not receive a prompt id`);
 }
+
+test("HTTP API rejects browser attempts to override the configured upstream before doing work", async () => {
+    const fake = createFakeClient();
+    const api = createTestApi(fake, {
+        parseMultipart: async () => ({
+            fields: { workflowId: "portrait-pose-depth", prompt: "portrait", shotId: "shot-1", frame: "0", width: "1", height: "1", baseUrl: "http://attacker.example" },
+            files: { pose: imagePart(), depth: imagePart() },
+        }),
+    });
+    const server = await listen(api);
+    try {
+        const response = await server.request("/api/comfyui/jobs", { method: "POST" });
+        assert.equal(response.status, 400);
+        assert.equal((await response.json()).error.code, "INPUT_INVALID");
+        assert.equal(fake.calls.length, 0);
+    } finally {
+        await server.close();
+    }
+});
+
+test("cancellation waits for a pending queue response and cancels its actual returned prompt id", async () => {
+    let release;
+    let announce;
+    const queueReply = new Promise((resolve) => {
+        release = resolve;
+    });
+    const started = new Promise((resolve) => {
+        announce = resolve;
+    });
+    const fake = createFakeClient({
+        queuePrompt: async () => {
+            announce();
+            await queueReply;
+            return { prompt_id: "late-real-prompt" };
+        },
+    });
+    const server = await listen(createTestApi(fake));
+    try {
+        const created = await (await server.request("/api/comfyui/jobs", { method: "POST" })).json();
+        await started;
+        const cancellation = server.request(`/api/comfyui/jobs/${created.taskId}`, { method: "DELETE" });
+        await waitForStatus(server.request, created.taskId, "cancelled");
+        release();
+        assert.equal((await cancellation).status, 200);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        assert.deepEqual(
+            fake.calls.filter((call) => call.method === "interrupt").map((call) => call.promptId),
+            ["late-real-prompt"],
+        );
+        assert.equal((await (await server.request(`/api/comfyui/jobs/${created.taskId}`)).json()).status, "cancelled");
+    } finally {
+        release();
+        await server.close();
+    }
+});
+
+test("reports unconfirmed upstream cancellation without undoing local terminal cancellation", async () => {
+    let release;
+    const fake = createFakeClient({
+        waiting: new Promise((resolve) => {
+            release = resolve;
+        }),
+    });
+    fake.interrupt = async () => {
+        throw Object.assign(new Error("No scoped cancellation support"), { code: "COMFYUI_TARGETED_CANCEL_UNSUPPORTED" });
+    };
+    const server = await listen(createTestApi(fake));
+    try {
+        const created = await (await server.request("/api/comfyui/jobs", { method: "POST" })).json();
+        await waitForPromptId(server.request, created.taskId);
+        const response = await server.request(`/api/comfyui/jobs/${created.taskId}`, { method: "DELETE" });
+        assert.equal(response.status, 502);
+        assert.equal((await response.json()).error.code, "CANCEL_UNCONFIRMED");
+        assert.equal((await (await server.request(`/api/comfyui/jobs/${created.taskId}`)).json()).status, "cancelled");
+    } finally {
+        release();
+        await server.close();
+    }
+});
+
+test("history polling fails promptly on an upstream execution error instead of waiting for missing outputs", async () => {
+    const fake = createFakeClient();
+    fake.waitForCompletion = undefined;
+    fake.getHistory = async () => ({ "prompt-1": { status: { completed: false, status_str: "error", messages: [["execution_error", { exception_message: "CUDA out of memory", node_id: "18" }]] }, outputs: {} } });
+    const server = await listen(createTestApi(fake));
+    try {
+        const created = await (await server.request("/api/comfyui/jobs", { method: "POST" })).json();
+        const failed = await waitForStatus(server.request, created.taskId, "failed");
+        assert.equal(failed.error.code, "GENERATION_FAILED");
+    } finally {
+        await server.close();
+    }
+});
+
+test("history polling removes each completed delay's abort listener", async () => {
+    const { getEventListeners } = await import("node:events");
+    let signal;
+    let calls = 0;
+    const fake = createFakeClient();
+    fake.waitForCompletion = async (input) => {
+        signal = input.signal;
+        throw Object.assign(new Error("offline"), { code: "COMFYUI_WEBSOCKET_DISCONNECTED" });
+    };
+    fake.getHistory = async () => (++calls <= 12 ? {} : { "prompt-1": { outputs: { 21: { images: [{ filename: "result.png", type: "output" }] } } } });
+    const server = await listen(createTestApi(fake, { historyPollMs: 1 }));
+    try {
+        const created = await (await server.request("/api/comfyui/jobs", { method: "POST" })).json();
+        await waitForStatus(server.request, created.taskId, "succeeded");
+        assert.equal(getEventListeners(signal, "abort").length, 0);
+    } finally {
+        await server.close();
+    }
+});
+
+test("cached history can finish a job even if its WebSocket completion event was missed", async () => {
+    let release;
+    const fake = createFakeClient({
+        waiting: new Promise((resolve) => {
+            release = resolve;
+        }),
+    });
+    fake.getHistory = async () => ({ "prompt-1": { outputs: { 21: { images: [{ filename: "cached.png", type: "output" }] } } } });
+    const server = await listen(createTestApi(fake));
+    try {
+        const created = await (await server.request("/api/comfyui/jobs", { method: "POST" })).json();
+        assert.equal((await waitForStatus(server.request, created.taskId, "succeeded")).status, "succeeded");
+    } finally {
+        release();
+        await server.close();
+    }
+});

@@ -13,7 +13,7 @@ export class ComfyUiWebSocketError extends ComfyUiClientError {
     }
 }
 
-export function createComfyUiClient({ baseUrl, apiPrefix = "", fetchImpl = globalThis.fetch, websocketFactory, timeoutMs = 120_000 } = {}) {
+export function createComfyUiClient({ baseUrl, apiPrefix = "", fetchImpl = globalThis.fetch, websocketFactory, websocketEnabled = true, timeoutMs = 120_000 } = {}) {
     const requestBaseUrl = normalizeBaseUrl(baseUrl);
     const prefix = normalizeApiPrefix(apiPrefix);
     const resolvedWebsocketFactory = websocketFactory ?? createDefaultWebSocketFactory;
@@ -100,25 +100,27 @@ export function createComfyUiClient({ baseUrl, apiPrefix = "", fetchImpl = globa
             };
         },
 
-        waitForCompletion({ clientId, promptId, onProgress, signal } = {}) {
-            if (typeof clientId !== "string" || !clientId || typeof promptId !== "string" || !promptId) {
-                return Promise.reject(new ComfyUiWebSocketError("COMFYUI_WEBSOCKET_INVALID", "clientId and promptId are required"));
-            }
-            return waitForCompletion({
-                websocketFactory: resolvedWebsocketFactory,
-                websocketUrl: buildWebSocketUrl(requestBaseUrl, prefix, clientId),
-                promptId,
-                onProgress,
-                signal,
-                timeoutMs,
-            });
-        },
+        waitForCompletion: websocketEnabled
+            ? function ({ clientId, promptId, onProgress, signal } = {}) {
+                  if (typeof clientId !== "string" || !clientId || typeof promptId !== "string" || !promptId) {
+                      return Promise.reject(new ComfyUiWebSocketError("COMFYUI_WEBSOCKET_INVALID", "clientId and promptId are required"));
+                  }
+                  return waitForCompletion({
+                      websocketFactory: resolvedWebsocketFactory,
+                      websocketUrl: buildWebSocketUrl(requestBaseUrl, prefix, clientId),
+                      promptId,
+                      onProgress,
+                      signal,
+                      timeoutMs,
+                  });
+              }
+            : undefined,
 
-        async getHistory(promptId) {
+        async getHistory(promptId, { signal } = {}) {
             if (typeof promptId !== "string" || !promptId) {
                 throw new ComfyUiClientError("COMFYUI_HISTORY_INVALID", "promptId is required");
             }
-            const response = await request(`/history/${encodeURIComponent(promptId)}`);
+            const response = await request(`/history/${encodeURIComponent(promptId)}`, { signal });
             return parseJson(response, "COMFYUI_HISTORY_FAILED");
         },
 
@@ -140,7 +142,8 @@ export function createComfyUiClient({ baseUrl, apiPrefix = "", fetchImpl = globa
                 throw new ComfyUiClientError("COMFYUI_INTERRUPT_INVALID", "promptId is required");
             }
             try {
-                await request(`/jobs/${encodeURIComponent(promptId)}/cancel`, { method: "POST" });
+                const response = await request(`/jobs/${encodeURIComponent(promptId)}/cancel`, { method: "POST" });
+                if (response.status !== 204) await response.arrayBuffer();
             } catch (error) {
                 if (error instanceof ComfyUiClientError && [404, 405, 501].includes(error.status)) {
                     throw new ComfyUiClientError("COMFYUI_TARGETED_CANCEL_UNSUPPORTED", "Configured ComfyUI endpoint does not support job-scoped cancellation", error);
@@ -156,6 +159,10 @@ export function selectComfyUiOutput(history, { promptId, outputNode } = {}) {
         throw new ComfyUiClientError("COMFYUI_HISTORY_INVALID", "History, promptId, and outputNode are required");
     }
     const promptHistory = history[promptId];
+    if (promptHistory?.status?.status_str === "error") {
+        const interrupted = promptHistory.status.messages?.some((message) => Array.isArray(message) && message[0] === "execution_interrupted");
+        throw new ComfyUiClientError(interrupted ? "CANCELLED" : "COMFYUI_EXECUTION_FAILED", interrupted ? "ComfyUI execution was interrupted" : "ComfyUI execution failed; check the GPU worker logs, available memory and model configuration");
+    }
     const images = promptHistory?.outputs?.[outputNode]?.images;
     const image = Array.isArray(images) ? images[0] : undefined;
     if (!isRecord(image) || typeof image.filename !== "string" || !image.filename) {
@@ -222,6 +229,8 @@ function waitForCompletion({ websocketFactory, websocketUrl, promptId, onProgres
                         percent: Number.isFinite(value) && Number.isFinite(max) && max > 0 ? (value / max) * 100 : undefined,
                     });
                 }
+                if (message.type === "execution_error") settle(new ComfyUiClientError("COMFYUI_EXECUTION_FAILED", "ComfyUI execution failed; check the GPU worker logs, available memory and model configuration"));
+                if (message.type === "execution_interrupted") settle(new ComfyUiClientError("CANCELLED", "ComfyUI execution was interrupted"));
                 if (message.type === "executing" && message.data.node === null) settle();
             }),
             addSocketListener(socket, "error", (event) => {
@@ -286,8 +295,8 @@ function normalizeApiPrefix(apiPrefix) {
     }
     const trimmed = apiPrefix.trim().replace(/^\/+|\/+$/g, "");
     if (!trimmed) return "";
-    if (trimmed.includes("/../") || trimmed === "..") {
-        throw new ComfyUiClientError("COMFYUI_URL_INVALID", "ComfyUI API prefix cannot contain traversal");
+    if (!/^[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*$/.test(trimmed)) {
+        throw new ComfyUiClientError("COMFYUI_URL_INVALID", "ComfyUI API prefix must be a plain path without traversal or URL controls");
     }
     return `/${trimmed}`;
 }

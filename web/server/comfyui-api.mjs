@@ -5,13 +5,13 @@ import { selectComfyUiOutput } from "./comfyui-client.mjs";
 import { ComfyUiTaskStoreError } from "./comfyui-task-store.mjs";
 
 const DEFAULT_MAX_BYTES = 25 * 1024 * 1024;
-const DEFAULT_HISTORY_POLL_MS = 25;
+const DEFAULT_HISTORY_POLL_MS = 500;
 const DEFAULT_HISTORY_TIMEOUT_MS = 120_000;
 const MAX_SOURCE_IMAGE_DIMENSION = 8192;
 const MAX_SOURCE_IMAGE_PIXELS = MAX_SOURCE_IMAGE_DIMENSION * MAX_SOURCE_IMAGE_DIMENSION;
 const IMAGE_MIME_TYPES = new Set(["image/png", "image/webp"]);
 
-export function createComfyUiApi({ client, registry, store, maxBytes = DEFAULT_MAX_BYTES, parseMultipart = parseMultipartRequest } = {}) {
+export function createComfyUiApi({ client, registry, store, maxBytes = DEFAULT_MAX_BYTES, parseMultipart = parseMultipartRequest, historyPollMs = DEFAULT_HISTORY_POLL_MS, historyTimeoutMs = DEFAULT_HISTORY_TIMEOUT_MS } = {}) {
     if (!client || typeof client.uploadImage !== "function" || typeof client.queuePrompt !== "function") throw new Error("A ComfyUI client is required");
     if (!registry || typeof registry.get !== "function" || typeof registry.patch !== "function") throw new Error("A workflow registry is required");
     if (!store || typeof store.create !== "function" || typeof store.get !== "function") throw new Error("A ComfyUI task store is required");
@@ -19,6 +19,7 @@ export function createComfyUiApi({ client, registry, store, maxBytes = DEFAULT_M
     if (typeof parseMultipart !== "function") throw new Error("parseMultipart must be a function");
 
     const active = new Map();
+    const cancellations = new Map();
     let closed = false;
 
     return {
@@ -39,14 +40,21 @@ export function createComfyUiApi({ client, registry, store, maxBytes = DEFAULT_M
         async close() {
             if (closed) return;
             closed = true;
-            for (const entry of active.values()) entry.controller.abort();
+            const pending = [...active.entries()].map(([taskId, entry]) => {
+                entry.controller.abort();
+                return cancelUpstream(taskId, entry, store.get(taskId)?.promptId);
+            });
+            await Promise.allSettled(pending);
             active.clear();
+            cancellations.clear();
             store.close?.();
             await client.close?.();
         },
     };
 
     async function routeRequest(request, response) {
+        // Keep idempotent cancellation outcomes bounded by the task store's TTL.
+        for (const taskId of cancellations.keys()) if (!store.get(taskId)) cancellations.delete(taskId);
         const url = new URL(request.url ?? "/", "http://127.0.0.1");
         const method = String(request.method ?? "GET").toUpperCase();
         const pathname = normalizePath(url.pathname);
@@ -92,20 +100,41 @@ export function createComfyUiApi({ client, registry, store, maxBytes = DEFAULT_M
         sendJson(response, 202, publicTask(store.get(task.taskId)));
     }
 
+    function cancelUpstream(taskId, entry, promptId) {
+        if (cancellations.has(taskId)) return cancellations.get(taskId);
+        const cancellation = (async () => {
+            // A POST may have been accepted before its response arrived. Resolve
+            // that response first; cancelling the proposed ID too early is a no-op.
+            if (entry?.queuePromise) {
+                try {
+                    const queued = await entry.queuePromise;
+                    promptId = queued?.prompt_id || promptId;
+                } catch {
+                    // The current pinned upstream honors our proposed UUID. If
+                    // only the response was lost, still attempt a scoped cancel.
+                }
+            }
+            if (promptId) {
+                if (typeof client.interrupt !== "function") throw new Error("Scoped cancellation is unavailable");
+                await client.interrupt(promptId);
+            }
+        })();
+        cancellations.set(taskId, cancellation);
+        return cancellation;
+    }
+
     async function cancelJob(response, taskId) {
         const task = store.get(taskId);
         if (!task) throw new HttpError(404, "COMFYUI_TASK_NOT_FOUND", "ComfyUI task not found", false);
-
-        const promptId = task.promptId;
         const wasActive = !isTerminal(task.status);
         const cancelled = store.cancel(taskId);
         const entry = active.get(taskId);
         entry?.controller.abort();
-        if (wasActive && promptId && typeof client.interrupt === "function") {
+        if (wasActive || cancellations.has(taskId)) {
             try {
-                await client.interrupt(promptId);
+                await cancelUpstream(taskId, entry, task.promptId);
             } catch {
-                // Cancellation is terminal locally even if the upstream reports a late/unknown prompt.
+                throw new HttpError(502, "CANCEL_UNCONFIRMED", "Local generation is cancelled, but upstream cancellation could not be confirmed; check the ComfyUI queue", true);
             }
         }
         sendJson(response, 200, publicTask(cancelled));
@@ -148,6 +177,7 @@ export function createComfyUiApi({ client, registry, store, maxBytes = DEFAULT_M
     }
 
     async function runJob(taskId, input, controller) {
+        const entry = active.get(taskId);
         let phase = "upload";
         try {
             assertJobActive(taskId);
@@ -173,9 +203,13 @@ export function createComfyUiApi({ client, registry, store, maxBytes = DEFAULT_M
             const requestedPromptId = randomUUID();
             store.update(taskId, { promptId: requestedPromptId });
             phase = "queue";
-            const queued = await client.queuePrompt({ prompt: patched.workflow, clientId, promptId: requestedPromptId });
-            assertJobActive(taskId);
+            entry.queuePromise = client.queuePrompt({ prompt: patched.workflow, clientId, promptId: requestedPromptId });
+            const queued = await entry.queuePromise;
             const promptId = typeof queued?.prompt_id === "string" && queued.prompt_id ? queued.prompt_id : requestedPromptId;
+            if (!isJobActive(taskId)) {
+                await cancelUpstream(taskId, entry, promptId);
+                return;
+            }
             store.update(taskId, { status: "submitted", promptId });
 
             // Keep the submitted state observable to clients before entering execution.
@@ -183,56 +217,56 @@ export function createComfyUiApi({ client, registry, store, maxBytes = DEFAULT_M
             assertJobActive(taskId);
             store.update(taskId, { status: "running" });
 
-            let disconnected = false;
+            // History is authoritative even if a cached job finished before the
+            // WebSocket connected. Monitor WS for progress/errors in parallel;
+            // losing progress must never prevent a completed image from arriving.
             phase = "progress";
+            const monitoring = new AbortController();
+            const monitorSignal = AbortSignal.any([controller.signal, monitoring.signal]);
+            let progressFailure;
             if (typeof client.waitForCompletion === "function") {
-                try {
-                    await client.waitForCompletion({
-                        clientId,
-                        promptId,
-                        signal: controller.signal,
-                        onProgress(progress) {
-                            if (!isJobActive(taskId)) return;
-                            try {
-                                store.update(taskId, { status: "running", progress });
-                            } catch {
-                                // A cancellation can win between the active check and this callback.
-                            }
-                        },
+                void Promise.resolve()
+                    .then(() =>
+                        client.waitForCompletion({
+                            clientId,
+                            promptId,
+                            signal: monitorSignal,
+                            onProgress(progress) {
+                                if (!isJobActive(taskId) || monitorSignal.aborted) return;
+                                try {
+                                    store.update(taskId, { status: "running", progress });
+                                } catch {
+                                    /* Cancellation won. */
+                                }
+                            },
+                        }),
+                    )
+                    .catch((error) => {
+                        if (monitorSignal.aborted || ["COMFYUI_WEBSOCKET_DISCONNECTED", "COMFYUI_WEBSOCKET_TIMEOUT"].includes(error?.code)) return;
+                        progressFailure = error;
+                        monitoring.abort(error);
                     });
-                } catch (error) {
-                    if (isAbortError(error) && !isJobActive(taskId)) return;
-                    if (error?.code !== "COMFYUI_WEBSOCKET_DISCONNECTED") throw error;
-                    disconnected = true;
-                }
-            } else {
-                disconnected = true;
             }
-
-            assertJobActive(taskId);
-            phase = "history";
-            const history = disconnected ? await waitForHistory(promptId, input.outputNode, controller.signal) : await client.getHistory(promptId);
-            let outputRef;
+            let history;
             try {
-                outputRef = selectComfyUiOutput(history, { promptId, outputNode: input.outputNode });
-            } catch (error) {
-                if (!disconnected) {
-                    const completedHistory = await waitForHistory(promptId, input.outputNode, controller.signal);
-                    outputRef = selectComfyUiOutput(completedHistory, { promptId, outputNode: input.outputNode });
-                } else {
-                    throw error;
-                }
+                phase = "history";
+                history = await waitForHistory(promptId, input.outputNode, monitorSignal);
+                if (progressFailure) throw progressFailure;
+            } finally {
+                monitoring.abort();
             }
+            const outputRef = selectComfyUiOutput(history, { promptId, outputNode: input.outputNode });
             assertJobActive(taskId);
             phase = "output";
-            const output = await client.getOutput(outputRef);
+            const output = await client.getOutput({ ...outputRef, signal: controller.signal });
             assertJobActive(taskId);
             store.update(taskId, { status: "succeeded", output: { bytes: output.bytes, mimeType: output.mimeType, width: output.width, height: output.height } });
         } catch (error) {
             if (!isJobActive(taskId)) return;
             const normalized = normalizeJobFailure(error, phase);
             try {
-                store.update(taskId, { status: "failed", error: normalized });
+                if (normalized.code === "CANCELLED") store.cancel(taskId);
+                else store.update(taskId, { status: "failed", error: normalized });
             } catch {
                 // A concurrent DELETE may have made cancellation terminal.
             }
@@ -242,22 +276,25 @@ export function createComfyUiApi({ client, registry, store, maxBytes = DEFAULT_M
     }
 
     async function waitForHistory(promptId, outputNode, signal) {
-        const deadline = Date.now() + DEFAULT_HISTORY_TIMEOUT_MS;
+        const deadline = Date.now() + historyTimeoutMs;
         let lastError;
         while (Date.now() < deadline) {
-            if (signal?.aborted) throw abortError();
+            if (signal?.aborted) throw signal.reason || abortError();
             try {
-                const history = await client.getHistory(promptId);
+                const history = await client.getHistory(promptId, { signal });
                 try {
                     selectComfyUiOutput(history, { promptId, outputNode });
                     return history;
-                } catch {
+                } catch (error) {
+                    if (["COMFYUI_EXECUTION_FAILED", "CANCELLED"].includes(error?.code)) throw error;
                     // History may exist before the declared output node is ready.
                 }
             } catch (error) {
+                if (signal?.aborted) throw signal.reason || error;
+                if (["COMFYUI_EXECUTION_FAILED", "CANCELLED"].includes(error?.code)) throw error;
                 lastError = error;
             }
-            await delay(DEFAULT_HISTORY_POLL_MS, signal);
+            await delay(historyPollMs, signal);
         }
         throw lastError ?? new Error(`Timed out waiting for ComfyUI prompt ${promptId}`);
     }
@@ -332,6 +369,8 @@ function parsePartHeaders(value) {
 
 function validateJobInput(parsed, registry, maxBytes) {
     const fields = normalizeFields(parsed);
+    const allowedFields = new Set(["workflowId", "prompt", "negativePrompt", "seed", "shotId", "frame", "width", "height", "camera", "idempotencyKey"]);
+    if (Object.keys(fields).some((field) => !allowedFields.has(field))) throw new HttpError(400, "INPUT_INVALID", "Unsupported job field; upstream configuration is server-only", false);
     const workflowId = requiredText(fields.workflowId, "workflowId");
     try {
         registry.get(workflowId);
@@ -512,9 +551,12 @@ function normalizeJobFailure(error, phase = "upstream") {
 function mapFailureCode(code, { errorName = "", phase = "upstream" } = {}) {
     const normalizedCode = typeof code === "string" ? code : "";
     if (errorName === "TimeoutError" || normalizedCode.includes("TIMEOUT")) return phase === "output" ? "OUTPUT_FAILED" : "COMFYUI_UNAVAILABLE";
+    if (normalizedCode === "COMFYUI_HTTP_ERROR" && phase === "queue") return "QUEUE_FAILED";
+    if (normalizedCode === "COMFYUI_HTTP_ERROR" && phase === "upload") return "UPLOAD_FAILED";
     if (normalizedCode === "COMFYUI_UPLOAD_FAILED" || normalizedCode.includes("UPLOAD")) return "UPLOAD_FAILED";
     if (normalizedCode === "COMFYUI_QUEUE_FAILED" || normalizedCode.includes("QUEUE")) return "QUEUE_FAILED";
     if (normalizedCode.includes("OUTPUT") || phase === "output") return "OUTPUT_FAILED";
+    if (normalizedCode === "COMFYUI_EXECUTION_FAILED") return "GENERATION_FAILED";
     if (normalizedCode.includes("WORKFLOW")) return "WORKFLOW_INVALID";
     if (normalizedCode === "CANCELLED") return "CANCELLED";
     if (normalizedCode === "COMFYUI_UNAVAILABLE") return "COMFYUI_UNAVAILABLE";
@@ -564,16 +606,18 @@ function isAbortError(error) {
 }
 
 function delay(ms, signal) {
+    if (signal?.aborted) return Promise.reject(signal.reason || abortError());
     return new Promise((resolve, reject) => {
-        const timer = setTimeout(resolve, ms);
-        if (signal) {
-            const abort = () => {
-                clearTimeout(timer);
-                reject(abortError());
-            };
-            if (signal.aborted) abort();
-            else signal.addEventListener("abort", abort, { once: true });
-        }
+        const abort = () => {
+            clearTimeout(timer);
+            signal?.removeEventListener("abort", abort);
+            reject(signal.reason || abortError());
+        };
+        const timer = setTimeout(() => {
+            signal?.removeEventListener("abort", abort);
+            resolve();
+        }, ms);
+        signal?.addEventListener("abort", abort, { once: true });
     });
 }
 
