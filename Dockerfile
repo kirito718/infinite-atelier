@@ -26,6 +26,7 @@ COPY --from=build /app/package*.json ./
 COPY --from=build /app/node_modules ./node_modules
 
 RUN npm install --global "@openai/codex@${CODEX_CLI_VERSION}" \
+    && codex --version \
     && npm cache clean --force \
     && mkdir -p /data/codex \
     && chown -R node:node /data/codex

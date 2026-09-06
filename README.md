@@ -140,6 +140,30 @@ docker compose down -v    # 同时删除 codex-data，故意重置登录状态
 
 升级镜像或重新构建时，先执行 `docker compose pull`（使用远程镜像）或 `docker compose build`（从源码构建），再执行 `docker compose up -d`。只要不使用 `down -v`，`codex-data` 会保留 OAuth 状态；升级前也应按需备份该卷。`docker compose down -v` 是不可逆的登录状态重置操作，之后需要再次通过页面连接 ChatGPT。
 
+### 备份与恢复 `codex-data`
+
+`codex-data` 包含 Codex 的 OAuth 敏感状态。备份文件等同于登录凭据：只保存到受控的本地加密存储，限制文件权限，且不要上传到代码仓库、共享网盘或日志系统。
+
+在 `compose.yaml` 所在目录执行以下命令可创建备份；先停止服务以获得一致的卷快照：
+
+```bash
+docker compose stop atelier
+docker compose run --rm --no-deps --entrypoint tar -v "$PWD:/backup" atelier \
+  -czf "/backup/codex-data-backup-$(date +%F).tgz" -C /data/codex .
+docker compose up -d atelier
+```
+
+恢复会覆盖现有 OAuth 状态。确认备份文件路径后，停止服务并执行：
+
+```bash
+docker compose down
+docker compose run --rm --no-deps --entrypoint sh -v "$PWD:/backup" atelier \
+  -c 'find /data/codex -mindepth 1 -maxdepth 1 -exec rm -rf {} + && tar xzf /backup/codex-data-backup-YYYY-MM-DD.tgz -C /data/codex'
+docker compose up -d atelier
+```
+
+将示例中的 `YYYY-MM-DD` 替换为实际备份日期；恢复后请妥善保管该归档，避免任何未授权访问。
+
 Compose 支持以下环境变量：
 
 ```bash
@@ -149,7 +173,7 @@ ATELIER_BIND_ADDRESS=127.0.0.1 \
 docker compose up -d
 ```
 
-`IMAGE_TAG` 默认是 `latest`，`ATELIER_IMAGE` 默认是 `ghcr.io/kirito718/infinite-atelier`，`ATELIER_BIND_ADDRESS` 默认是 `127.0.0.1`；端口默认是 `3000`。除非已经配置受保护的 HTTPS 反向代理或 VPN，否则请保持 `ATELIER_BIND_ADDRESS=127.0.0.1`，不要将容器端口直接暴露到公网。该部署按单用户实例设计，不提供多用户账号、权限隔离或租户边界。
+`IMAGE_TAG` 默认是 `latest`，`ATELIER_IMAGE` 默认是 `ghcr.io/kirito718/infinite-atelier`，`ATELIER_BIND_ADDRESS` 默认是 `127.0.0.1`；端口默认是 `3000`。`PULL_POLICY` 默认是 `build`，因此源码运行会构建本地镜像；已执行 `docker compose pull` 的 GHCR 镜像请用 `PULL_POLICY=never` 启动，避免 Compose 改为本地构建或再次拉取。除非已经配置受保护的 HTTPS 反向代理或 VPN，否则请保持 `ATELIER_BIND_ADDRESS=127.0.0.1`，不要将容器端口直接暴露到公网。该部署按单用户实例设计，不提供多用户账号、权限隔离或租户边界。
 
 ### 从 GHCR 使用预构建镜像
 
@@ -161,6 +185,7 @@ ATELIER_IMAGE=ghcr.io/kirito718/infinite-atelier \
 docker compose pull atelier
 IMAGE_TAG=latest \
 ATELIER_IMAGE=ghcr.io/kirito718/infinite-atelier \
+PULL_POLICY=never \
 docker compose up -d atelier
 ```
 
