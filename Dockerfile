@@ -35,6 +35,8 @@ RUN chmod 755 /usr/local/bin/infinite-atelier-entrypoint
 
 ENV CODEX_HOME=/data/codex
 
+VOLUME ["/data/codex"]
+
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
