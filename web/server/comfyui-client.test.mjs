@@ -148,6 +148,23 @@ test("caller abort rejects a stalled binary response body", async () => {
     assert.equal(capturedSignal?.aborted, true);
 });
 
+test("pre-aborted body reads still consume a late rejection", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const client = createComfyUiClient({
+        baseUrl: "http://comfyui.internal:8188",
+        fetchImpl: async () => ({
+            ok: true,
+            status: 200,
+            headers: new Headers({ "content-type": "application/json" }),
+            json: () => Promise.reject(new Error("late body failure")),
+        }),
+        websocketFactory: unavailableWebSocket,
+    });
+
+    await assert.rejects(client.uploadImage({ bytes: new Uint8Array([1]), filename: "pose.png", mimeType: "image/png", signal: controller.signal }), (error) => error.code === "COMFYUI_UPLOAD_FAILED" && error.cause?.name === "AbortError");
+});
+
 test("queues a prompt with request-scoped client and prompt identifiers", async () => {
     const calls = [];
     const client = createComfyUiClient({

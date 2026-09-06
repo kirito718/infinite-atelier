@@ -195,6 +195,27 @@ test("HTTP API marks queue failures terminal after uploads", async () => {
     }
 });
 
+test("HTTP API turns a getOutput timeout into a terminal output failure and expires it", async () => {
+    const fake = createFakeClient({
+        getOutput: async () => {
+            throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
+        },
+    });
+    const api = createTestApi(fake, { ttlMs: 25 });
+    const server = await listen(api);
+    try {
+        const created = await server.request("/api/comfyui/jobs", { method: "POST", headers: { "idempotency-key": "output-timeout" } });
+        const body = await created.json();
+        const failed = await waitForStatus(server.request, body.taskId, "failed");
+        assert.equal(failed.error.code, "OUTPUT_FAILED");
+        assert.equal(failed.error.retryable, true);
+        await new Promise((resolve) => setTimeout(resolve, 40));
+        assert.equal((await server.request(`/api/comfyui/jobs/${body.taskId}`)).status, 404);
+    } finally {
+        await server.close();
+    }
+});
+
 test("HTTP API rejects an overlong idempotency key", async () => {
     const fake = createFakeClient();
     const api = createTestApi(fake);
@@ -294,7 +315,7 @@ test("DELETE cancels the prompt and ignores a late successful callback", async (
 });
 
 function createTestApi(client, options = {}) {
-    const store = createComfyUiTaskStore({ ttlMs: 10_000 });
+    const store = createComfyUiTaskStore({ ttlMs: options.ttlMs ?? 10_000 });
     const registry = {
         get(workflowId) {
             if (workflowId !== "portrait-pose-depth") throw new Error("unknown workflow");
@@ -314,7 +335,7 @@ function createTestApi(client, options = {}) {
     return createComfyUiApi({ client, registry, store, parseMultipart, maxBytes: 10 * 1024 * 1024 });
 }
 
-function createFakeClient({ waiting = Promise.resolve(), uploadImage, queuePrompt } = {}) {
+function createFakeClient({ waiting = Promise.resolve(), uploadImage, queuePrompt, getOutput } = {}) {
     const calls = [];
     return {
         calls,
@@ -339,6 +360,7 @@ function createFakeClient({ waiting = Promise.resolve(), uploadImage, queuePromp
         },
         async getOutput() {
             calls.push({ method: "getOutput" });
+            if (getOutput) return getOutput();
             return { bytes: PNG, mimeType: "image/png" };
         },
         async interrupt(promptId) {

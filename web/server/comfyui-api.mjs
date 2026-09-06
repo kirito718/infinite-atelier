@@ -148,6 +148,7 @@ export function createComfyUiApi({ client, registry, store, maxBytes = DEFAULT_M
     }
 
     async function runJob(taskId, input, controller) {
+        let phase = "upload";
         try {
             assertJobActive(taskId);
             store.update(taskId, { status: "uploading" });
@@ -166,10 +167,12 @@ export function createComfyUiApi({ client, registry, store, maxBytes = DEFAULT_M
             };
             if (input.negativePrompt !== undefined) workflowInputs.negativePrompt = input.negativePrompt;
             if (input.seed !== undefined) workflowInputs.seed = input.seed;
+            phase = "workflow";
             const patched = registry.patch(input.workflowId, workflowInputs);
             const clientId = randomUUID();
             const requestedPromptId = randomUUID();
             store.update(taskId, { promptId: requestedPromptId });
+            phase = "queue";
             const queued = await client.queuePrompt({ prompt: patched.workflow, clientId, promptId: requestedPromptId });
             assertJobActive(taskId);
             const promptId = typeof queued?.prompt_id === "string" && queued.prompt_id ? queued.prompt_id : requestedPromptId;
@@ -181,6 +184,7 @@ export function createComfyUiApi({ client, registry, store, maxBytes = DEFAULT_M
             store.update(taskId, { status: "running" });
 
             let disconnected = false;
+            phase = "progress";
             if (typeof client.waitForCompletion === "function") {
                 try {
                     await client.waitForCompletion({
@@ -206,6 +210,7 @@ export function createComfyUiApi({ client, registry, store, maxBytes = DEFAULT_M
             }
 
             assertJobActive(taskId);
+            phase = "history";
             const history = disconnected ? await waitForHistory(promptId, input.outputNode, controller.signal) : await client.getHistory(promptId);
             let outputRef;
             try {
@@ -219,12 +224,13 @@ export function createComfyUiApi({ client, registry, store, maxBytes = DEFAULT_M
                 }
             }
             assertJobActive(taskId);
+            phase = "output";
             const output = await client.getOutput(outputRef);
             assertJobActive(taskId);
             store.update(taskId, { status: "succeeded", output: { bytes: output.bytes, mimeType: output.mimeType, width: output.width, height: output.height } });
         } catch (error) {
             if (!isJobActive(taskId)) return;
-            const normalized = normalizeJobFailure(error);
+            const normalized = normalizeJobFailure(error, phase);
             try {
                 store.update(taskId, { status: "failed", error: normalized });
             } catch {
@@ -495,19 +501,24 @@ function isTerminal(status) {
     return status === "succeeded" || status === "failed" || status === "cancelled";
 }
 
-function normalizeJobFailure(error) {
-    const code = error?.code || "COMFYUI_UNAVAILABLE";
+function normalizeJobFailure(error, phase = "upstream") {
+    const rawCode = typeof error?.code === "string" ? error.code : "";
+    const errorName = typeof error?.name === "string" ? error.name : "";
+    const code = mapFailureCode(rawCode, { errorName, phase });
     const message = safeMessage(error, "ComfyUI generation failed");
-    return { code: mapFailureCode(code), message, retryable: !["CANCELLED", "WORKFLOW_INVALID", "INPUT_INVALID"].includes(code) };
+    return { code, message, retryable: !["CANCELLED", "WORKFLOW_INVALID", "INPUT_INVALID"].includes(code) };
 }
 
-function mapFailureCode(code) {
-    if (code === "COMFYUI_UPLOAD_FAILED" || code.includes("UPLOAD")) return "UPLOAD_FAILED";
-    if (code === "COMFYUI_QUEUE_FAILED" || code.includes("QUEUE")) return "QUEUE_FAILED";
-    if (code.includes("OUTPUT")) return "OUTPUT_FAILED";
-    if (code.includes("WORKFLOW")) return "WORKFLOW_INVALID";
-    if (code === "CANCELLED") return "CANCELLED";
-    return code;
+function mapFailureCode(code, { errorName = "", phase = "upstream" } = {}) {
+    const normalizedCode = typeof code === "string" ? code : "";
+    if (errorName === "TimeoutError" || normalizedCode.includes("TIMEOUT")) return phase === "output" ? "OUTPUT_FAILED" : "COMFYUI_UNAVAILABLE";
+    if (normalizedCode === "COMFYUI_UPLOAD_FAILED" || normalizedCode.includes("UPLOAD")) return "UPLOAD_FAILED";
+    if (normalizedCode === "COMFYUI_QUEUE_FAILED" || normalizedCode.includes("QUEUE")) return "QUEUE_FAILED";
+    if (normalizedCode.includes("OUTPUT") || phase === "output") return "OUTPUT_FAILED";
+    if (normalizedCode.includes("WORKFLOW")) return "WORKFLOW_INVALID";
+    if (normalizedCode === "CANCELLED") return "CANCELLED";
+    if (normalizedCode === "COMFYUI_UNAVAILABLE") return "COMFYUI_UNAVAILABLE";
+    return "COMFYUI_UNAVAILABLE";
 }
 
 function normalizeError(error) {

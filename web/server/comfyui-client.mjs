@@ -397,6 +397,7 @@ function raceWithAbort(operation, signal) {
     if (!signal) return operation;
     return new Promise((resolve, reject) => {
         let settled = false;
+        const operationPromise = Promise.resolve(operation);
         const finish = (callback, value) => {
             if (settled) return;
             settled = true;
@@ -405,11 +406,15 @@ function raceWithAbort(operation, signal) {
         };
         const abort = () => finish(reject, signal.reason ?? createAbortError());
         if (signal.aborted) {
+            operationPromise.then(
+                () => {},
+                () => {},
+            );
             abort();
             return;
         }
         signal.addEventListener("abort", abort, { once: true });
-        operation.then(
+        operationPromise.then(
             (value) => finish(resolve, value),
             (error) => finish(reject, error),
         );
