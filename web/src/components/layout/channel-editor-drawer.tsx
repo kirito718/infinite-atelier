@@ -1,9 +1,10 @@
 import { Button, Drawer, Input, Segmented, Select, Space } from "antd";
-import { ListPlus, Trash2 } from "lucide-react";
+import { ExternalLink, ListPlus, LogIn, LogOut, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { defaultBaseUrlForApiFormat, guessCapability, normalizeChannelModels, type ApiCallFormat, type ChannelModel, type ModelCapability, type ModelChannel } from "@/stores/use-config-store";
+import { CODEX_SUBSCRIPTION_CHANNEL_ID, defaultBaseUrlForApiFormat, guessCapability, normalizeChannelModels, type ApiCallFormat, type ChannelModel, type ModelCapability, type ModelChannel } from "@/stores/use-config-store";
+import { beginCodexLogin, getCodexStatus, logoutCodex, type CodexStatus } from "@/services/codex-image";
 import { ModelScriptEditor } from "./model-script-editor";
 import { ModelSelectModal } from "./model-select-modal";
 
@@ -14,6 +15,7 @@ export function ChannelEditorDrawer({ open, channel, onSave, onClose }: { open: 
     const [draft, setDraft] = useState<ModelChannel | null>(channel);
     const [selectOpen, setSelectOpen] = useState(false);
     const [scriptTarget, setScriptTarget] = useState<ScriptTarget | null>(null);
+    const [codexStatus, setCodexStatus] = useState<CodexStatus>("unavailable");
     const apiFormatOptions: Array<{ label: string; value: ApiCallFormat }> = [
         { label: "OpenAI", value: "openai" },
         { label: "Gemini", value: "gemini" },
@@ -23,6 +25,21 @@ export function ChannelEditorDrawer({ open, channel, onSave, onClose }: { open: 
     useEffect(() => {
         if (open && channel) setDraft(channel);
     }, [open, channel]);
+
+    useEffect(() => {
+        if (!open || channel?.id !== CODEX_SUBSCRIPTION_CHANNEL_ID) return;
+        let active = true;
+        const refresh = () =>
+            void getCodexStatus()
+                .then((status) => active && setCodexStatus(status))
+                .catch(() => active && setCodexStatus("unavailable"));
+        refresh();
+        const timer = window.setInterval(refresh, 1500);
+        return () => {
+            active = false;
+            window.clearInterval(timer);
+        };
+    }, [open, channel?.id]);
 
     if (!draft) return null;
 
@@ -48,6 +65,30 @@ export function ChannelEditorDrawer({ open, channel, onSave, onClose }: { open: 
         onClose();
     };
 
+    const connectCodex = async () => {
+        const loginWindow = window.open("about:blank", "_blank");
+        setCodexStatus("connecting");
+        try {
+            const { authUrl } = await beginCodexLogin();
+            if (loginWindow && !loginWindow.closed) loginWindow.location.replace(authUrl);
+            else window.open(authUrl, "_blank", "noopener,noreferrer");
+            setCodexStatus("connecting");
+        } catch {
+            loginWindow?.close();
+            setCodexStatus("unavailable");
+        }
+    };
+
+    const disconnectCodex = async () => {
+        try {
+            await logoutCodex();
+        } finally {
+            setCodexStatus("disconnected");
+        }
+    };
+
+    const isCodexSubscription = draft.id === CODEX_SUBSCRIPTION_CHANNEL_ID;
+
     return (
         <Drawer
             open={open}
@@ -58,72 +99,100 @@ export function ChannelEditorDrawer({ open, channel, onSave, onClose }: { open: 
             extra={
                 <Space>
                     <Button onClick={onClose}>{t("common.cancel")}</Button>
-                    <Button type="primary" onClick={save}>
-                        {t("common.save")}
-                    </Button>
+                    {!isCodexSubscription ? (
+                        <Button type="primary" onClick={save}>
+                            {t("common.save")}
+                        </Button>
+                    ) : null}
                 </Space>
             }
         >
-            <div className="grid gap-4 md:grid-cols-2">
-                <label className="block">
-                    <span className="mb-1 block text-sm font-medium">{t("config.channelEditor.name")}</span>
-                    <Input value={draft.name} onChange={(event) => patch({ name: event.target.value })} />
-                </label>
-                <label className="block">
-                    <span className="mb-1 block text-sm font-medium">{t("config.channelEditor.protocol")}</span>
-                    <Select className="w-full" value={draft.apiFormat} options={apiFormatOptions} onChange={changeApiFormat} />
-                </label>
-                <label className="block md:col-span-2">
-                    <span className="mb-1 block text-sm font-medium">{t("config.channelEditor.baseUrl")}</span>
-                    <Input value={draft.baseUrl} onChange={(event) => patch({ baseUrl: event.target.value })} placeholder="https://api.example.com" />
-                </label>
-                <label className="block md:col-span-2">
-                    <span className="mb-1 block text-sm font-medium">API Key</span>
-                    <Input.Password value={draft.apiKey} onChange={(event) => patch({ apiKey: event.target.value })} placeholder="sk-..." />
-                </label>
-            </div>
-
-            <div className="mt-6 mb-3 flex flex-wrap items-center justify-between gap-2">
-                <div>
-                    <div className="text-sm font-semibold">{t("config.channelEditor.models")}</div>
-                    <div className="mt-0.5 text-xs text-stone-500">{t("config.channelEditor.modelDescription", { count: draft.models.length })}</div>
+            {isCodexSubscription ? (
+                <div className="space-y-4 rounded-lg border border-stone-200 p-4 dark:border-stone-800">
+                    <div>
+                        <div className="text-base font-semibold">{t("config.codex.title")}</div>
+                        <div className="mt-1 text-sm text-stone-500">{t("config.codex.description")}</div>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-3">
+                        <span className="rounded-full border border-stone-200 px-3 py-1 text-sm dark:border-stone-700">{t(`config.codex.status.${codexStatus}`)}</span>
+                        {codexStatus === "connected" ? (
+                            <Button icon={<LogOut className="size-4" />} onClick={() => void disconnectCodex()}>
+                                {t("config.codex.disconnect")}
+                            </Button>
+                        ) : (
+                            <Button type="primary" icon={<LogIn className="size-4" />} loading={codexStatus === "connecting"} onClick={() => void connectCodex()}>
+                                {t("config.codex.connect")}
+                            </Button>
+                        )}
+                        {codexStatus === "connecting" ? <ExternalLink className="size-4 text-stone-400" aria-label={t("config.codex.waiting") as string} /> : null}
+                    </div>
+                    <div className="text-xs text-stone-500">{t("config.codex.imageOnly")}</div>
                 </div>
-                <Button type="primary" icon={<ListPlus className="size-4" />} onClick={() => setSelectOpen(true)}>
-                    {t("config.channelEditor.selectModels")}
-                </Button>
-            </div>
+            ) : null}
+            {isCodexSubscription ? null : (
+                <>
+                    <div className="grid gap-4 md:grid-cols-2">
+                        <label className="block">
+                            <span className="mb-1 block text-sm font-medium">{t("config.channelEditor.name")}</span>
+                            <Input value={draft.name} onChange={(event) => patch({ name: event.target.value })} />
+                        </label>
+                        <label className="block">
+                            <span className="mb-1 block text-sm font-medium">{t("config.channelEditor.protocol")}</span>
+                            <Select className="w-full" value={draft.apiFormat} options={apiFormatOptions} onChange={changeApiFormat} />
+                        </label>
+                        <label className="block md:col-span-2">
+                            <span className="mb-1 block text-sm font-medium">{t("config.channelEditor.baseUrl")}</span>
+                            <Input value={draft.baseUrl} onChange={(event) => patch({ baseUrl: event.target.value })} placeholder="https://api.example.com" />
+                        </label>
+                        <label className="block md:col-span-2">
+                            <span className="mb-1 block text-sm font-medium">API Key</span>
+                            <Input.Password value={draft.apiKey} onChange={(event) => patch({ apiKey: event.target.value })} placeholder="sk-..." />
+                        </label>
+                    </div>
 
-            <div className="space-y-2 rounded-lg border border-stone-200 p-2 dark:border-stone-800">
-                {draft.models.length ? (
-                    draft.models.map((model) => (
-                        <div key={model.name} className="flex flex-wrap items-center gap-3 rounded-md px-2 py-1.5 hover:bg-stone-50 dark:hover:bg-stone-900/40">
-                            <span className="min-w-0 flex-1 truncate text-sm" title={model.name}>
-                                {model.name}
-                            </span>
-                            <div className="flex shrink-0 items-center gap-2">
-                                <Segmented size="small" value={model.capability} options={capabilityOptions} onChange={(value) => setCapability(model.name, value as ModelCapability)} />
-                                <Button size="small" type={model.script ? "primary" : "default"} ghost={Boolean(model.script)} onClick={() => setScriptTarget({ name: model.name, capability: model.capability, value: model.script || "" })}>
-                                    {t(model.script ? "config.channelEditor.scriptReady" : "config.channelEditor.script")}
-                                </Button>
-                                <Button size="small" danger type="text" icon={<Trash2 className="size-3.5" />} onClick={() => removeModel(model.name)} />
-                            </div>
+                    <div className="mt-6 mb-3 flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                            <div className="text-sm font-semibold">{t("config.channelEditor.models")}</div>
+                            <div className="mt-0.5 text-xs text-stone-500">{t("config.channelEditor.modelDescription", { count: draft.models.length })}</div>
                         </div>
-                    ))
-                ) : (
-                    <div className="px-2 py-8 text-center text-sm text-stone-500">{t("config.channelEditor.empty")}</div>
-                )}
-            </div>
+                        <Button type="primary" icon={<ListPlus className="size-4" />} onClick={() => setSelectOpen(true)}>
+                            {t("config.channelEditor.selectModels")}
+                        </Button>
+                    </div>
 
-            <ModelSelectModal open={selectOpen} channel={draft} selectedNames={draft.models.map((model) => model.name)} onConfirm={applySelection} onClose={() => setSelectOpen(false)} />
+                    <div className="space-y-2 rounded-lg border border-stone-200 p-2 dark:border-stone-800">
+                        {draft.models.length ? (
+                            draft.models.map((model) => (
+                                <div key={model.name} className="flex flex-wrap items-center gap-3 rounded-md px-2 py-1.5 hover:bg-stone-50 dark:hover:bg-stone-900/40">
+                                    <span className="min-w-0 flex-1 truncate text-sm" title={model.name}>
+                                        {model.name}
+                                    </span>
+                                    <div className="flex shrink-0 items-center gap-2">
+                                        <Segmented size="small" value={model.capability} options={capabilityOptions} onChange={(value) => setCapability(model.name, value as ModelCapability)} />
+                                        <Button size="small" type={model.script ? "primary" : "default"} ghost={Boolean(model.script)} onClick={() => setScriptTarget({ name: model.name, capability: model.capability, value: model.script || "" })}>
+                                            {t(model.script ? "config.channelEditor.scriptReady" : "config.channelEditor.script")}
+                                        </Button>
+                                        <Button size="small" danger type="text" icon={<Trash2 className="size-3.5" />} onClick={() => removeModel(model.name)} />
+                                    </div>
+                                </div>
+                            ))
+                        ) : (
+                            <div className="px-2 py-8 text-center text-sm text-stone-500">{t("config.channelEditor.empty")}</div>
+                        )}
+                    </div>
 
-            <ModelScriptEditor
-                open={Boolean(scriptTarget)}
-                capability={scriptTarget?.capability || "text"}
-                modelName={scriptTarget?.name || ""}
-                value={scriptTarget?.value || ""}
-                onSave={(script) => scriptTarget && setScript(scriptTarget.name, script)}
-                onClose={() => setScriptTarget(null)}
-            />
+                    <ModelSelectModal open={selectOpen} channel={draft} selectedNames={draft.models.map((model) => model.name)} onConfirm={applySelection} onClose={() => setSelectOpen(false)} />
+
+                    <ModelScriptEditor
+                        open={Boolean(scriptTarget)}
+                        capability={scriptTarget?.capability || "text"}
+                        modelName={scriptTarget?.name || ""}
+                        value={scriptTarget?.value || ""}
+                        onSave={(script) => scriptTarget && setScript(scriptTarget.name, script)}
+                        onClose={() => setScriptTarget(null)}
+                    />
+                </>
+            )}
         </Drawer>
     );
 }

@@ -8,8 +8,10 @@ import { useTranslation } from "react-i18next";
 import { requestEdit, requestGeneration, requestImageQuestion } from "@/services/api/image";
 import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audio";
 import { requestVideoGeneration, storeGeneratedVideo } from "@/services/api/video";
-import { defaultConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
+import { defaultConfig, isCodexSubscriptionModel, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { uploadImage } from "@/services/image-storage";
+import { codexImageFileId, createCodexImageTask, downloadCodexImage, waitForCodexImageTask } from "@/services/codex-image";
+import { routeImageGeneration } from "@/services/image-generation-router";
 import { uploadMediaFile } from "@/services/file-storage";
 import { nanoid } from "nanoid";
 import { getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
@@ -124,6 +126,36 @@ const NODE_STATUS_IDLE = "idle" as const;
 const NODE_STATUS_LOADING = "loading" as const;
 const NODE_STATUS_SUCCESS = "success" as const;
 const NODE_STATUS_ERROR = "error" as const;
+
+async function requestCanvasImage(config: AiConfig, prompt: string, references: ReferenceImage[], options?: { signal?: AbortSignal }, mask?: ReferenceImage) {
+    if (mask && isCodexSubscriptionModel(config.model)) throw new Error("Codex subscription image editing does not support masks");
+    return routeImageGeneration({
+        model: config.model,
+        prompt,
+        references,
+        signal: options?.signal,
+        codex: async ({ prompt: codexPrompt, operation, references: codexReferences, signal }) => {
+            const task = await createCodexImageTask({ prompt: codexPrompt, operation, references: codexReferences }, { signal });
+            const completed = await waitForCodexImageTask(task.taskId, { signal });
+            const file = completed.files[0];
+            if (!file) throw new Error("Codex did not return an image file");
+            const blob = await downloadCodexImage(completed.taskId, codexImageFileId(file), { signal });
+            return { dataUrl: await blobToDataUrl(blob) };
+        },
+        provider: ({ prompt: providerPrompt, references: providerReferences, signal }) =>
+            providerReferences.length ? requestEdit(config, providerPrompt, providerReferences, mask, { signal }).then((items) => items[0]) : requestGeneration(config, providerPrompt, { signal }).then((items) => items[0]),
+    });
+}
+
+function blobToDataUrl(blob: Blob) {
+    return new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ""));
+        reader.onerror = () => reject(reader.error || new Error("Failed to read generated image"));
+        reader.readAsDataURL(blob);
+    });
+}
+
 export default function CanvasPage() {
     const [mounted, setMounted] = useState(false);
 
@@ -1669,7 +1701,7 @@ function AtelierCanvasPage() {
             setDialogNodeId(childId);
             const controller = startGenerationRequest(childId, node.id, childId);
             try {
-                const image = await requestEdit(generationConfig, prompt, [source], { id: `${node.id}-mask`, name: "mask.png", type: "image/png", dataUrl: payload.maskDataUrl }, { signal: controller.signal }).then((items) => items[0]);
+                const image = await requestCanvasImage(generationConfig, prompt, [source], { signal: controller.signal }, { id: `${node.id}-mask`, name: "mask.png", type: "image/png", dataUrl: payload.maskDataUrl });
                 const uploaded = await uploadImage(image.dataUrl);
                 const size = fitNodeSize(uploaded.width, uploaded.height, node.width, node.height);
                 setNodes((prev) => prev.map((item) => (item.id === childId ? { ...item, width: size.width, height: size.height, metadata: { ...item.metadata, ...imageMetadata(uploaded), prompt, ...generationMetadata } } : item)));
@@ -1745,13 +1777,9 @@ function AtelierCanvasPage() {
             setDialogNodeId(childId);
             const controller = startGenerationRequest(childId, node.id, childId);
             try {
-                const image = await requestEdit(
-                    generationConfig,
-                    prompt,
-                    [{ id: node.id, name: `${node.title || node.id}.png`, type: node.metadata.mimeType || "image/png", dataUrl: node.metadata.content, storageKey: node.metadata.storageKey }],
-                    undefined,
-                    { signal: controller.signal },
-                ).then((items) => items[0]);
+                const image = await requestCanvasImage(generationConfig, prompt, [{ id: node.id, name: `${node.title || node.id}.png`, type: node.metadata.mimeType || "image/png", dataUrl: node.metadata.content, storageKey: node.metadata.storageKey }], {
+                    signal: controller.signal,
+                });
                 const uploaded = await uploadImage(image.dataUrl);
                 const size = fitNodeSize(uploaded.width, uploaded.height, imageConfig.width, imageConfig.height);
                 setNodes((prev) => prev.map((item) => (item.id === childId ? { ...item, width: size.width, height: size.height, metadata: { ...item.metadata, ...imageMetadata(uploaded), prompt, ...generationMetadata } } : item)));
@@ -1972,8 +2000,8 @@ function AtelierCanvasPage() {
                             : [],
                     );
                     const image = refs.length
-                        ? await requestEdit({ ...generationConfig, count: "1" }, fullPrompt, refs, undefined, { signal: controller.signal }).then((items) => items[0])
-                        : await requestGeneration({ ...generationConfig, count: "1" }, fullPrompt, { signal: controller.signal }).then((items) => items[0]);
+                        ? await requestCanvasImage({ ...generationConfig, count: "1" }, fullPrompt, refs, { signal: controller.signal })
+                        : await requestCanvasImage({ ...generationConfig, count: "1" }, fullPrompt, [], { signal: controller.signal });
                     const uploaded = await uploadImage(image.dataUrl);
                     setNodes((prev) =>
                         prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, ...imageMetadata(uploaded), prompt: scene, model: generationConfig.model, status: NODE_STATUS_SUCCESS, errorDetails: undefined } } : node)),
@@ -2098,9 +2126,7 @@ function AtelierCanvasPage() {
                     await Promise.all(
                         imageIds.map(async (imageId) => {
                             try {
-                                const image = referenceImages.length
-                                    ? await requestEdit({ ...generationConfig, count: "1" }, effectivePrompt, referenceImages, undefined, { signal: controller.signal }).then((items) => items[0])
-                                    : await requestGeneration({ ...generationConfig, count: "1" }, effectivePrompt, { signal: controller.signal }).then((items) => items[0]);
+                                const image = await requestCanvasImage({ ...generationConfig, count: "1" }, effectivePrompt, referenceImages, { signal: controller.signal });
                                 const uploaded = await uploadImage(image.dataUrl);
                                 const imageSize = fitNodeSize(uploaded.width, uploaded.height, imageConfig.width, imageConfig.height);
                                 const item: CanvasNodeImage = {
@@ -2482,9 +2508,7 @@ function AtelierCanvasPage() {
                     return;
                 }
 
-                const image = useReferenceImages
-                    ? await requestEdit(generationConfig, prompt, retryImages, undefined, { signal: controller.signal }).then((items) => items[0])
-                    : await requestGeneration(generationConfig, prompt, { signal: controller.signal }).then((items) => items[0]);
+                const image = await requestCanvasImage(generationConfig, prompt, useReferenceImages ? retryImages : [], { signal: controller.signal });
                 const uploadedImage = await uploadImage(image.dataUrl);
                 const imageConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
                 const retryImage: CanvasNodeImage = {

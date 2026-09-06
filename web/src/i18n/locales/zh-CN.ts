@@ -857,6 +857,22 @@ export default {
             defaultName: "默认渠道",
             newName: "新渠道",
             indexedName: "渠道 {{index}}",
+            codexSubscriptionName: "Codex 订阅",
+            codexSubscriptionDescription: "ChatGPT 订阅生图 · 仅支持图片",
+        },
+        codex: {
+            title: "Codex 订阅生图",
+            description: "通过本机 Codex 登录使用 ChatGPT 订阅额度生成和编辑图片。凭据由 Codex 管理，不会保存到浏览器配置。",
+            connect: "连接 ChatGPT",
+            disconnect: "断开连接",
+            waiting: "等待登录完成",
+            imageOnly: "此渠道只用于图片生成与编辑；视频仍需配置视频服务商。",
+            status: {
+                disconnected: "未连接",
+                connecting: "连接中",
+                connected: "已连接",
+                unavailable: "桥接不可用",
+            },
         },
         preferences: {
             interface: "界面偏好",

@@ -79,6 +79,41 @@ npm run build
 
 所有配置、画布、资产和生成记录默认保存在当前浏览器本地。浏览器数据按网址来源隔离，因此不同磁盘目录只要都使用 `http://localhost:3000`，就会读取同一份本地配置。API Key 不会提交到仓库；分享导出的配置或截图前仍应检查敏感信息。
 
+## Codex 订阅生图（本地与远程）
+
+Codex 订阅渠道只负责图片生成与编辑，视频仍使用你配置的视频服务商。Infinite Atelier 后端在同一个 Vite 进程内管理 Codex App Server，浏览器只访问同源 `/api/codex-subscription`，不会连接额外的 loopback Bridge，也不会保存或读取 ChatGPT OAuth 凭据。
+
+本地开发在 `web` 目录运行：
+
+```bash
+npm install --legacy-peer-deps --include=optional
+npm run dev:atelier
+```
+
+然后打开配置 → 渠道 → Codex 订阅：
+
+1. 点击“连接 ChatGPT”并完成官方登录。
+2. 选择 `gpt-image-2`，创建一个图片节点，先测试纯提示词生图。
+3. 再连接一张参考图测试图片编辑，并确认结果同时出现在画布和素材库。
+4. 创建视频节点，确认它仍使用已配置的视频渠道；Codex 订阅不会出现在视频模型选择中。
+5. 点击“断开连接”，确认普通 API 渠道仍可使用。
+6. 如需检查凭据边界，可查看浏览器 `localStorage` 与 IndexedDB：其中不应出现 ChatGPT OAuth token。
+
+任务完成或取消后会清理临时图片文件。Codex OAuth 状态由服务器端 Codex CLI 的 `CODEX_HOME` 持久化，浏览器端不需要配置 API Key。
+
+远程服务器部署需要 Node.js、Codex CLI 和持久化的 `CODEX_HOME`：
+
+```bash
+cd web
+npm install --legacy-peer-deps --include=optional
+npm run build
+CODEX_HOME=/var/lib/infinite-atelier/codex npm start
+```
+
+`npm start` 会通过 `vite preview` 同时提供构建后的页面和 `/api/codex-subscription` 接口，并监听 `0.0.0.0:3000`。用户在远程页面点击“连接 ChatGPT”后，在自己的浏览器完成 OAuth；登录状态保存在远程服务器的 `CODEX_HOME`。远程主机必须能直接执行 `codex`，且应使用 HTTPS 和持久化磁盘。
+
+当前远程模式按单用户实例设计，接口本身不提供多用户权限隔离；请将站点放在 VPN、访问控制或反向代理认证之后，不要直接暴露到公网。
+
 ## 目录
 
 ```text
