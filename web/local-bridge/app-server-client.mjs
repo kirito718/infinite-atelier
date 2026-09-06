@@ -1,7 +1,8 @@
 import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { readFile, realpath } from "node:fs/promises";
-import { basename, extname, isAbsolute, relative, resolve } from "node:path";
+import { homedir } from "node:os";
+import { basename, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { createInterface } from "node:readline";
 
 import { redactBridgeError } from "./bridge-utils.mjs";
@@ -9,12 +10,19 @@ import { redactBridgeError } from "./bridge-utils.mjs";
 const CLIENT_INFO = { name: "Infinite Atelier", version: "1.0.0" };
 
 export class CodexAppServerClient extends EventEmitter {
-    constructor({ command = "codex", args = ["app-server", "--listen", "stdio://"], spawnProcess = (program, programArgs, options) => spawn(program, programArgs, options) } = {}) {
+    constructor({
+        command = "codex",
+        args = ["app-server", "--listen", "stdio://"],
+        spawnProcess = (program, programArgs, options) => spawn(program, programArgs, options),
+        generatedImagesDir = defaultGeneratedImagesDir(),
+    } = {}) {
         super();
         this.command = command;
         this.args = args;
         this.spawnProcess = spawnProcess;
+        this.generatedImagesDir = generatedImagesDir;
         this.status = "disconnected";
+        this.accountStatus = "disconnected";
         this.nextId = 1;
         this.pending = new Map();
         this.turns = new Map();
@@ -43,7 +51,25 @@ export class CodexAppServerClient extends EventEmitter {
 
     async readAccount() {
         await this.connect();
-        return this.sendRequest("account/read", { refreshToken: false });
+        const account = await this.sendRequest("account/read", { refreshToken: false });
+        this.accountStatus = account?.account ? "connected" : "disconnected";
+        return account;
+    }
+
+    async getAccountStatus() {
+        if (this.status !== "connected") {
+            try {
+                await this.connect();
+            } catch {
+                return this.status === "connecting" ? "connecting" : "unavailable";
+            }
+        }
+        try {
+            await this.readAccount();
+        } catch {
+            this.accountStatus = "disconnected";
+        }
+        return this.accountStatus;
     }
 
     async login() {
@@ -53,12 +79,16 @@ export class CodexAppServerClient extends EventEmitter {
             useHostedLoginSuccessPage: true,
             appBrand: "codex",
         });
+        if (result?.type !== "chatgpt" || typeof result.authUrl !== "string" || result.authUrl.length === 0) {
+            throw new Error("Codex did not return a ChatGPT login URL");
+        }
         return { authUrl: result.authUrl };
     }
 
     async logout() {
         await this.connect();
         await this.sendRequest("account/logout");
+        this.accountStatus = "disconnected";
     }
 
     async generateImage({ prompt, references = [], workDir, signal } = {}) {
@@ -68,7 +98,7 @@ export class CodexAppServerClient extends EventEmitter {
         const threadResult = await this.sendRequest("thread/start", {
             cwd: workDir,
             approvalPolicy: "never",
-            sandbox: "workspaceWrite",
+            sandbox: "workspace-write",
             serviceName: "infinite_atelier",
             ephemeral: true,
         });
@@ -99,6 +129,7 @@ export class CodexAppServerClient extends EventEmitter {
         }
         this.rejectPending(new Error("Codex app-server connection closed"));
         this.status = "disconnected";
+        this.accountStatus = "disconnected";
     }
 
     async initializeConnection() {
@@ -172,6 +203,16 @@ export class CodexAppServerClient extends EventEmitter {
         this.emit("notification", { method, params });
         this.emit(method, params);
 
+        if (method === "account/updated") {
+            this.accountStatus = "connected";
+            return;
+        }
+
+        if (method === "account/login/completed") {
+            this.accountStatus = params.success === true ? "connected" : "disconnected";
+            return;
+        }
+
         if (method === "item/completed" && params.item?.type === "imageGeneration") {
             const key = turnKey(params.threadId, params.turnId);
             const turn = this.turns.get(key) ?? this.earlyTurns.get(key) ?? { imageItems: [] };
@@ -221,7 +262,7 @@ export class CodexAppServerClient extends EventEmitter {
         this.earlyTurns.delete(key);
         turn.removeAbortListener();
         if (turn.completed.status === "completed") {
-            Promise.all(turn.imageItems.map((item) => readImageItem(item, turn.workDir))).then(
+            Promise.all(turn.imageItems.map((item) => readImageItem(item, turn.workDir, this.generatedImagesDir))).then(
                 (files) => turn.resolve({ files: files.filter(Boolean) }),
                 (error) => turn.reject(bridgeError(error)),
             );
@@ -260,19 +301,25 @@ export function parseJsonRpcLine(line) {
     return value;
 }
 
-async function readImageItem(item, workDir) {
+async function readImageItem(item, workDir, generatedImagesDir) {
     const data = decodeImageData(item.result);
     if (data) return { ...data, name: `generated-${item.id}${extensionForImageMime(data.mimeType)}` };
     if (!item.savedPath) throw new Error("Codex image result did not include image data");
-    if (!isContained(workDir, item.savedPath)) {
+    const allowedRoot = isContained(workDir, item.savedPath) ? workDir : generatedImagesDir;
+    if (!isContained(allowedRoot, item.savedPath)) {
         throw new Error("Codex saved image path is outside the task directory");
     }
-    const containedPath = await requireContainedRealPath(workDir, item.savedPath);
+    const containedPath = await requireContainedRealPath(allowedRoot, item.savedPath);
     return {
         bytes: await readFile(containedPath),
         mimeType: mimeTypeForPath(item.savedPath),
         name: basename(item.savedPath),
     };
+}
+
+function defaultGeneratedImagesDir() {
+    const codexHome = process.env.CODEX_HOME || join(homedir(), ".codex");
+    return join(codexHome, "generated_images");
 }
 
 async function requireContainedRealPath(directory, path) {

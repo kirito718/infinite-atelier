@@ -52,11 +52,39 @@ test("Codex client initializes once and sends documented image turn inputs", { t
         useHostedLoginSuccessPage: true,
         appBrand: "codex",
     });
+    assert.equal(requests[3].params.sandbox, "workspace-write");
     assert.deepEqual(requests[4].params.input, [
         { type: "text", text: "$imagegen Carve a translucent tower" },
         { type: "localImage", path: "/tmp/task/reference-0.png" },
     ]);
 
+    await client.close();
+});
+
+test("Codex client tracks ChatGPT OAuth completion notifications", async () => {
+    const process = createFakeAppServerProcess();
+    const client = new CodexAppServerClient({ spawnProcess: () => process });
+
+    await client.login();
+    assert.equal(client.accountStatus, "disconnected");
+
+    process.stdout.write(
+        `${JSON.stringify({
+            method: "account/login/completed",
+            params: { loginId: "login-1", success: true, error: null, onboardingEntrypoint: null },
+        })}\n`,
+    );
+    await waitUntil(() => client.accountStatus === "connected");
+    assert.equal(client.accountStatus, "connected");
+
+    process.stdout.write(
+        `${JSON.stringify({
+            method: "account/login/completed",
+            params: { loginId: "login-1", success: false, error: "cancelled", onboardingEntrypoint: null },
+        })}\n`,
+    );
+    await waitUntil(() => client.accountStatus === "disconnected");
+    assert.equal(client.accountStatus, "disconnected");
     await client.close();
 });
 
@@ -120,6 +148,67 @@ test("Codex client rejects saved image paths outside the task directory", async 
         }
     } finally {
         await rm(taskDir, { recursive: true, force: true });
+        await rm(siblingDir, { recursive: true, force: true });
+    }
+});
+
+test("Codex client accepts images saved in Codex's managed generated-images directory", async () => {
+    const taskDir = await mkdtemp(join(tmpdir(), "atelier-client-task-"));
+    const generatedImagesDir = await mkdtemp(join(tmpdir(), "atelier-codex-generated-"));
+    const savedPath = join(generatedImagesDir, "generated.png");
+    await writeFile(savedPath, PNG_BYTES);
+    const process = createFakeAppServerProcess({
+        imageItem: {
+            type: "imageGeneration",
+            id: "image-1",
+            status: "completed",
+            revisedPrompt: null,
+            result: "",
+            savedPath,
+            failure: null,
+        },
+    });
+    const client = new CodexAppServerClient({ spawnProcess: () => process, generatedImagesDir });
+
+    try {
+        const generated = await client.generateImage({ prompt: "Managed image", references: [], workDir: taskDir });
+        assert.deepEqual(generated.files[0].bytes, PNG_BYTES);
+        assert.equal(generated.files[0].mimeType, "image/png");
+        assert.equal(generated.files[0].name, "generated.png");
+    } finally {
+        await client.close();
+        await rm(taskDir, { recursive: true, force: true });
+        await rm(generatedImagesDir, { recursive: true, force: true });
+    }
+});
+
+test("Codex client rejects a managed generated-image symlink to an outside image", async () => {
+    const taskDir = await mkdtemp(join(tmpdir(), "atelier-client-task-"));
+    const generatedImagesDir = await mkdtemp(join(tmpdir(), "atelier-codex-generated-"));
+    const siblingDir = await mkdtemp(join(tmpdir(), "atelier-client-sibling-"));
+    const outsidePath = join(siblingDir, "private.png");
+    const symlinkPath = join(generatedImagesDir, "linked.png");
+    await writeFile(outsidePath, PNG_BYTES);
+    await symlink(outsidePath, symlinkPath);
+    const process = createFakeAppServerProcess({
+        imageItem: {
+            type: "imageGeneration",
+            id: "image-1",
+            status: "completed",
+            revisedPrompt: null,
+            result: "",
+            savedPath: symlinkPath,
+            failure: null,
+        },
+    });
+    const client = new CodexAppServerClient({ spawnProcess: () => process, generatedImagesDir });
+
+    try {
+        await assert.rejects(client.generateImage({ prompt: "Private image", references: [], workDir: taskDir }), /task directory/);
+    } finally {
+        await client.close();
+        await rm(taskDir, { recursive: true, force: true });
+        await rm(generatedImagesDir, { recursive: true, force: true });
         await rm(siblingDir, { recursive: true, force: true });
     }
 });
@@ -226,6 +315,15 @@ test("bridge does not stage or serve an in-task symlink to an outside image", as
 test("status endpoint reports the Codex connection state", async () => {
     await withServer({ status: "connected" }, async ({ request }) => {
         const response = await request("/v1/status");
+
+        assert.equal(response.status, 200);
+        assert.deepEqual(await response.json(), { status: "connected" });
+    });
+});
+
+test("bridge accepts the public codex-local prefix when a reverse proxy preserves it", async () => {
+    await withServer({ status: "connected" }, async ({ request }) => {
+        const response = await request("/codex-local/v1/status");
 
         assert.equal(response.status, 200);
         assert.deepEqual(await response.json(), { status: "connected" });
@@ -347,6 +445,67 @@ test("successful image task and file expire after the configured TTL", async () 
 
             assert.equal((await request(`/v1/images/${taskId}`)).status, 404);
             assert.equal((await request(fileUrl)).status, 404);
+        },
+        { cleanupMs: 100 },
+    );
+});
+
+test("failed image tasks expire after the configured TTL", async () => {
+    const codex = {
+        status: "connected",
+        async generateImage() {
+            throw new Error("generation failed");
+        },
+    };
+
+    await withServer(
+        codex,
+        async ({ request }) => {
+            const created = await request("/v1/images", {
+                method: "POST",
+                body: JSON.stringify({ operation: "generate", prompt: "A copper fox", references: [] }),
+            });
+            const { taskId } = await created.json();
+            await waitForTask(request, taskId, "failed");
+
+            await new Promise((resolve) => setTimeout(resolve, 150));
+
+            assert.equal((await request(`/v1/images/${taskId}`)).status, 404);
+        },
+        { cleanupMs: 100 },
+    );
+});
+
+test("cancelled image tasks expire after the configured TTL", async () => {
+    let startedResolve;
+    const started = new Promise((resolve) => {
+        startedResolve = resolve;
+    });
+    const codex = {
+        status: "connected",
+        async generateImage({ signal }) {
+            startedResolve();
+            await new Promise((resolve, reject) => {
+                signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+            });
+        },
+    };
+
+    await withServer(
+        codex,
+        async ({ request }) => {
+            const created = await request("/v1/images", {
+                method: "POST",
+                body: JSON.stringify({ operation: "generate", prompt: "A copper fox", references: [] }),
+            });
+            const { taskId } = await created.json();
+            await started;
+            assert.equal((await request(`/v1/images/${taskId}`, { method: "DELETE" })).status, 204);
+            await waitForTask(request, taskId, "cancelled");
+
+            await new Promise((resolve) => setTimeout(resolve, 150));
+
+            assert.equal((await request(`/v1/images/${taskId}`)).status, 404);
         },
         { cleanupMs: 100 },
     );

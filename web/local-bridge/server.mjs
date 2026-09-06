@@ -3,12 +3,10 @@ import { createServer } from "node:http";
 import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
 
-import { createBridgeToken, redactBridgeError, requireBridgeRequest, terminalTask } from "./bridge-utils.mjs";
+import { redactBridgeError, requireBridgeRequest, terminalTask } from "./bridge-utils.mjs";
 import { createCodexAppServerClient } from "./app-server-client.mjs";
 
-const DEFAULT_PORT = 43127;
 const DEFAULT_CLEANUP_MS = 10 * 60 * 1000;
 const MAX_BODY_BYTES = 25 * 1024 * 1024;
 
@@ -17,7 +15,7 @@ export function createBridgeServer({ secret, codex = createCodexAppServerClient(
         throw new Error("A bridge secret is required");
     }
 
-    const tasks = new Map();
+    const api = createCodexSubscriptionApi({ codex, cleanupMs, tempRoot, publicBasePath: "", endpointLabel: "Bridge" });
     const server = createServer(async (request, response) => {
         try {
             requireBridgeRequest(request, secret);
@@ -27,37 +25,57 @@ export function createBridgeServer({ secret, codex = createCodexAppServerClient(
         }
 
         try {
-            await routeRequest({ request, response, codex, tasks, cleanupMs, tempRoot });
+            await api.handle(request, response);
         } catch (error) {
             const statusCode = error instanceof HttpError ? error.statusCode : 500;
             sendJson(response, statusCode, { error: sanitizeDiagnostic(error) });
         }
     });
 
-    server.on("close", () => {
-        for (const task of tasks.values()) {
-            clearTimeout(task.cleanupTimer);
-            task.controller.abort(abortError());
-            void cleanupTaskFiles(task);
-        }
-        void codex.close?.();
-    });
+    server.on("close", () => void api.close());
 
     return server;
 }
 
-async function routeRequest({ request, response, codex, tasks, cleanupMs, tempRoot }) {
+export function createCodexSubscriptionApi({ codex = createCodexAppServerClient(), cleanupMs = DEFAULT_CLEANUP_MS, tempRoot = tmpdir(), publicBasePath = "/api/codex-subscription", endpointLabel = "Codex subscription" } = {}) {
+    const tasks = new Map();
+    let closed = false;
+
+    return {
+        handle: async (request, response) => {
+            try {
+                await routeRequest({ request, response, codex, tasks, cleanupMs, tempRoot, publicBasePath, endpointLabel });
+            } catch (error) {
+                const statusCode = error instanceof HttpError ? error.statusCode : 500;
+                sendJson(response, statusCode, { error: sanitizeDiagnostic(error, undefined, `${endpointLabel} request failed`) });
+            }
+        },
+        close: async () => {
+            if (closed) return;
+            closed = true;
+            for (const task of tasks.values()) {
+                clearTimeout(task.cleanupTimer);
+                task.controller.abort(abortError());
+                void cleanupTaskFiles(task);
+            }
+            await codex.close?.();
+        },
+    };
+}
+
+async function routeRequest({ request, response, codex, tasks, cleanupMs, tempRoot, publicBasePath, endpointLabel }) {
     const url = new URL(request.url ?? "/", "http://127.0.0.1");
     const method = request.method ?? "GET";
+    const pathname = normalizeBridgePath(url.pathname);
 
-    if (method === "GET" && url.pathname === "/v1/status") {
-        const rawStatus = typeof codex.getStatus === "function" ? codex.getStatus() : codex.status;
+    if (method === "GET" && pathname === "/v1/status") {
+        const rawStatus = typeof codex.getAccountStatus === "function" ? await codex.getAccountStatus() : typeof codex.getStatus === "function" ? codex.getStatus() : codex.status;
         const status = ["disconnected", "connecting", "connected", "unavailable"].includes(rawStatus) ? rawStatus : "unavailable";
         sendJson(response, 200, { status });
         return;
     }
 
-    if (method === "POST" && url.pathname === "/v1/login") {
+    if (method === "POST" && pathname === "/v1/login") {
         const result = await codex.login();
         if (typeof result?.authUrl !== "string" || result.authUrl.length === 0) {
             throw new Error("Codex login did not return an auth URL");
@@ -66,13 +84,13 @@ async function routeRequest({ request, response, codex, tasks, cleanupMs, tempRo
         return;
     }
 
-    if (method === "POST" && url.pathname === "/v1/logout") {
+    if (method === "POST" && pathname === "/v1/logout") {
         await codex.logout();
         response.writeHead(204).end();
         return;
     }
 
-    if (method === "POST" && url.pathname === "/v1/images") {
+    if (method === "POST" && pathname === "/v1/images") {
         const body = await readJsonBody(request);
         const input = validateImageRequest(body);
         const task = await createImageTask({ input, codex, tasks, cleanupMs, tempRoot });
@@ -80,13 +98,13 @@ async function routeRequest({ request, response, codex, tasks, cleanupMs, tempRo
         return;
     }
 
-    const taskMatch = /^\/v1\/images\/([0-9a-f-]+)$/i.exec(url.pathname);
+    const taskMatch = /^\/v1\/images\/([0-9a-f-]+)$/i.exec(pathname);
     if (taskMatch) {
         const task = tasks.get(taskMatch[1]);
         if (!task) throw new HttpError(404, "Image task not found");
 
         if (method === "GET") {
-            sendJson(response, 200, publicTask(task));
+            sendJson(response, 200, publicTask(task, publicBasePath));
             return;
         }
         if (method === "DELETE") {
@@ -96,12 +114,13 @@ async function routeRequest({ request, response, codex, tasks, cleanupMs, tempRo
             task.files = [];
             delete task.error;
             await cleanupTaskFiles(task);
+            scheduleTaskExpiry(task, tasks, cleanupMs);
             response.writeHead(204).end();
             return;
         }
     }
 
-    const fileMatch = /^\/v1\/images\/([0-9a-f-]+)\/files\/([0-9a-f-]+)$/i.exec(url.pathname);
+    const fileMatch = /^\/v1\/images\/([0-9a-f-]+)\/files\/([0-9a-f-]+)$/i.exec(pathname);
     if (method === "GET" && fileMatch) {
         const task = tasks.get(fileMatch[1]);
         const file = task?.files.find((candidate) => candidate.fileId === fileMatch[2]);
@@ -120,7 +139,15 @@ async function routeRequest({ request, response, codex, tasks, cleanupMs, tempRo
         return;
     }
 
-    throw new HttpError(404, "Bridge endpoint not found");
+    throw new HttpError(404, `${endpointLabel} endpoint not found`);
+}
+
+function normalizeBridgePath(pathname) {
+    if (pathname === "/api/codex-subscription") return "/";
+    if (pathname.startsWith("/api/codex-subscription/")) return pathname.slice("/api/codex-subscription".length);
+    if (pathname === "/codex-local") return "/";
+    if (pathname.startsWith("/codex-local/")) return pathname.slice("/codex-local".length);
+    return pathname;
 }
 
 async function createImageTask({ input, codex, tasks, cleanupMs, tempRoot }) {
@@ -190,10 +217,7 @@ async function runImageTask({ task, codex, input, cleanupMs, tasks }) {
 
         task.files = stagedFiles;
         task.status = "succeeded";
-        task.cleanupTimer = setTimeout(() => {
-            void cleanupTaskFiles(task).finally(() => tasks.delete(task.id));
-        }, cleanupMs);
-        task.cleanupTimer.unref?.();
+        scheduleTaskExpiry(task, tasks, cleanupMs);
     } catch (error) {
         task.files = [];
         const cancelled = task.controller.signal.aborted || error?.name === "AbortError";
@@ -202,7 +226,16 @@ async function runImageTask({ task, codex, input, cleanupMs, tasks }) {
         task.status = cancelled ? "cancelled" : "failed";
         if (diagnostic) task.error = diagnostic;
         else delete task.error;
+        scheduleTaskExpiry(task, tasks, cleanupMs);
     }
+}
+
+function scheduleTaskExpiry(task, tasks, cleanupMs) {
+    clearTimeout(task.cleanupTimer);
+    task.cleanupTimer = setTimeout(() => {
+        void cleanupTaskFiles(task).finally(() => tasks.delete(task.id));
+    }, cleanupMs);
+    task.cleanupTimer.unref?.();
 }
 
 function validateImageRequest(body) {
@@ -253,7 +286,8 @@ async function requireContainedRealPath(directory, path) {
     return realPath;
 }
 
-function publicTask(task) {
+function publicTask(task, publicBasePath) {
+    const basePath = publicBasePath ? `${publicBasePath}/v1` : "/v1";
     const result = {
         taskId: task.id,
         status: task.status,
@@ -262,7 +296,7 @@ function publicTask(task) {
             name: file.name,
             mimeType: file.mimeType,
             size: file.size,
-            url: `/v1/images/${task.id}/files/${file.fileId}`,
+            url: `${basePath}/images/${task.id}/files/${file.fileId}`,
         })),
     };
     if (task.error) result.error = task.error;
@@ -330,11 +364,11 @@ function extensionForMime(mimeType) {
     );
 }
 
-function sanitizeDiagnostic(error, workDir) {
+function sanitizeDiagnostic(error, workDir, fallback = "Bridge request failed") {
     let message = redactBridgeError(error instanceof Error ? error.message : String(error));
     if (workDir) message = message.split(workDir).join("[path]");
     message = message.replace(/(^|[^A-Za-z0-9_/])(?:\/[^\s'"\])}>;,]+|[A-Za-z]:\\[^\s'"\])}>;,]+)/g, "$1[path]");
-    return message || "Bridge request failed";
+    return message || fallback;
 }
 
 function abortError() {
@@ -346,19 +380,4 @@ class HttpError extends Error {
         super(message);
         this.statusCode = statusCode;
     }
-}
-
-async function startCli() {
-    const secret = process.env.INFINITE_ATELIER_BRIDGE_TOKEN || createBridgeToken();
-    const port = Number.parseInt(process.env.INFINITE_ATELIER_BRIDGE_PORT ?? "", 10) || DEFAULT_PORT;
-    const codex = createCodexAppServerClient();
-    const server = createBridgeServer({ secret, codex });
-    server.listen(port, "127.0.0.1", () => {
-        process.stdout.write(`Infinite Atelier bridge listening on http://127.0.0.1:${port}\n`);
-        void codex.connect().catch(() => {});
-    });
-}
-
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-    void startCli();
 }

@@ -56,9 +56,19 @@ export type AiConfig = {
 export type ConfigTabKey = "channels" | "preferences" | "backup";
 
 export const CONFIG_STORE_KEY = "infinite-canvas:ai_config_store";
+export const CODEX_SUBSCRIPTION_CHANNEL_ID = "codex-subscription";
 const CHANNEL_MODEL_SEPARATOR = "::";
 const OPENAI_BASE_URL = "https://api.openai.com";
 const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com";
+
+const codexSubscriptionChannel = (): ModelChannel => ({
+    id: CODEX_SUBSCRIPTION_CHANNEL_ID,
+    name: i18n.t("config.channels.codexSubscriptionName"),
+    baseUrl: "/api/codex-subscription",
+    apiKey: "",
+    apiFormat: "openai",
+    models: [{ name: "gpt-image-2", capability: "image" }],
+});
 
 export const defaultConfig: AiConfig = {
     channelMode: "local",
@@ -79,6 +89,7 @@ export const defaultConfig: AiConfig = {
                 { name: "gpt-4o-mini-tts", capability: "audio" },
             ],
         },
+        codexSubscriptionChannel(),
     ],
     model: "default::gpt-image-2",
     imageModel: "default::gpt-image-2",
@@ -95,7 +106,7 @@ export const defaultConfig: AiConfig = {
     videoWatermark: "false",
     systemPrompt: "",
     reasoningEffort: "auto",
-    models: ["default::gpt-image-2", "default::grok-imagine-video", "default::gpt-5.5", "default::gpt-4o-mini-tts"],
+    models: ["default::gpt-image-2", "default::grok-imagine-video", "default::gpt-5.5", "default::gpt-4o-mini-tts", "codex-subscription::gpt-image-2"],
     quality: "auto",
     size: "1:1",
     background: "",
@@ -144,6 +155,10 @@ export function modelCapabilityOf(config: AiConfig, value: string): ModelCapabil
     return findChannelModel(config, value)?.model.capability;
 }
 
+export function isCodexSubscriptionModel(value: string) {
+    return decodeChannelModel(value)?.channelId === CODEX_SUBSCRIPTION_CHANNEL_ID;
+}
+
 export function modelMatchesCapability(config: AiConfig, value: string, capability?: ModelCapability) {
     if (!capability) return true;
     return modelCapabilityOf(config, value) === capability;
@@ -167,7 +182,8 @@ export function resolveModelScript(config: AiConfig, value: string) {
     return findChannelModel(config, value)?.model.script?.trim() || "";
 }
 
-function isAiConfigReady(config: AiConfig, model: string) {
+export function isAiConfigReady(config: AiConfig, model: string) {
+    if (isCodexSubscriptionModel(model)) return Boolean(model.trim() && modelCapabilityOf(config, model) === "image");
     const channel = resolveModelChannel(config, model);
     return Boolean(model.trim() && channel.baseUrl.trim() && channel.apiKey.trim());
 }
@@ -307,7 +323,18 @@ export function resolveModelChannel(config: AiConfig, value: string) {
     const decoded = decodeChannelModel(value);
     const model = decoded?.model || value;
     const matched = decoded ? config.channels.find((channel) => channel.id === decoded.channelId) : config.channels.find((channel) => channel.models.some((item) => item.name === model));
-    return matched || config.channels[0] || createModelChannel({ id: "default", name: i18n.t("config.channels.defaultName"), baseUrl: config.baseUrl, apiKey: config.apiKey, apiFormat: config.apiFormat, models: config.models.map(modelOptionName).map((name) => ({ name, capability: guessCapability(name) })) });
+    return (
+        matched ||
+        config.channels[0] ||
+        createModelChannel({
+            id: "default",
+            name: i18n.t("config.channels.defaultName"),
+            baseUrl: config.baseUrl,
+            apiKey: config.apiKey,
+            apiFormat: config.apiFormat,
+            models: config.models.map(modelOptionName).map((name) => ({ name, capability: guessCapability(name) })),
+        })
+    );
 }
 
 export function resolveModelRequestConfig(config: AiConfig, value: string) {
@@ -331,8 +358,15 @@ function normalizeChannels(config: AiConfig) {
             models: normalizeChannelModels(channel.models),
         }),
     );
-    if (!channels.length) {
-        channels.push(
+    const existingCodex = channels.find((channel) => channel.id === CODEX_SUBSCRIPTION_CHANNEL_ID);
+    if (existingCodex) {
+        const index = channels.indexOf(existingCodex);
+        channels[index] = codexSubscriptionChannel();
+    } else {
+        channels.push(codexSubscriptionChannel());
+    }
+    if (!channels.some((channel) => channel.id !== CODEX_SUBSCRIPTION_CHANNEL_ID)) {
+        channels.unshift(
             createModelChannel({
                 id: "default",
                 name: i18n.t("config.channels.defaultName"),

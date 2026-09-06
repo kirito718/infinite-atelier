@@ -3,6 +3,7 @@ import type { IncomingMessage } from "node:http";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
+import { createCodexSubscriptionApi } from "./server/codex-subscription-api.mjs";
 import { defineConfig, type Plugin } from "vite";
 
 const webDir = dirname(fileURLToPath(import.meta.url));
@@ -68,9 +69,43 @@ function readRequestBody(req: IncomingMessage): Promise<Buffer | undefined> {
     });
 }
 
+export function codexSubscriptionApiPlugin({ createApi = createCodexSubscriptionApi } = {}): Plugin {
+    let api: ReturnType<typeof createCodexSubscriptionApi> | undefined;
+
+    const getApi = () => {
+        api ??= createApi();
+        return api;
+    };
+
+    const middleware = (request: IncomingMessage, response: import("node:http").ServerResponse, next: () => void) => {
+        if (!(request.url || "").startsWith("/api/codex-subscription")) {
+            next();
+            return;
+        }
+        void getApi()
+            .handle(request, response)
+            .catch((error) => {
+                if (response.headersSent) return;
+                response.statusCode = 500;
+                response.end(error instanceof Error ? error.message : String(error));
+            });
+    };
+
+    const attach = (server: any) => {
+        server.middlewares.use(middleware);
+        server.httpServer?.once("close", () => void api?.close());
+    };
+
+    return {
+        name: "infinite-atelier-codex-subscription-api",
+        configureServer: attach,
+        configurePreviewServer: attach,
+    };
+}
+
 export default defineConfig({
     base: process.env.VITE_BASE || "/",
-    plugins: [react(), apiProxyPlugin()],
+    plugins: [react(), apiProxyPlugin(), codexSubscriptionApiPlugin()],
     resolve: {
         alias: {
             "@": resolve(webDir, "src"),

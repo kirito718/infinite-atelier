@@ -858,6 +858,22 @@ export default {
             defaultName: "Default provider",
             newName: "New provider",
             indexedName: "Provider {{index}}",
+            codexSubscriptionName: "Codex subscription",
+            codexSubscriptionDescription: "ChatGPT subscription image generation · Images only",
+        },
+        codex: {
+            title: "Codex subscription image generation",
+            description: "Sign in through the local Codex process to use your ChatGPT subscription for image generation and editing. Codex owns the credentials; they are not saved in browser settings.",
+            connect: "Connect ChatGPT",
+            disconnect: "Disconnect",
+            waiting: "Waiting for login",
+            imageOnly: "This channel is for image generation and editing only; configure a video provider for video.",
+            status: {
+                disconnected: "Disconnected",
+                connecting: "Connecting",
+                connected: "Connected",
+                unavailable: "Bridge unavailable",
+            },
         },
         preferences: {
             interface: "Interface",
