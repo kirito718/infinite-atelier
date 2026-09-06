@@ -33,16 +33,21 @@ export function createComfyUiClient({ baseUrl, apiPrefix = "", fetchImpl = globa
                 signal: composed.signal,
             });
         } catch (error) {
-            throw new ComfyUiClientError("COMFYUI_UNAVAILABLE", `ComfyUI request failed: ${error instanceof Error ? error.message : String(error)}`, error);
-        } finally {
             composed.cleanup();
+            throw new ComfyUiClientError("COMFYUI_UNAVAILABLE", `ComfyUI request failed: ${error instanceof Error ? error.message : String(error)}`, error);
         }
         if (!response?.ok) {
-            const error = new ComfyUiClientError("COMFYUI_HTTP_ERROR", `ComfyUI request failed with status ${response?.status ?? "unknown"}: ${await responseErrorMessage(response)}`);
+            const message = await responseErrorMessage(response, composed.signal);
+            composed.cleanup();
+            const error = new ComfyUiClientError("COMFYUI_HTTP_ERROR", `ComfyUI request failed with status ${response?.status ?? "unknown"}: ${message}`);
             error.status = response?.status;
             throw error;
         }
-        return response;
+        if (response.status === 204 || response.headers?.get?.("content-length") === "0") {
+            composed.cleanup();
+            return response;
+        }
+        return createManagedResponse(response, composed.signal, composed.cleanup);
     };
 
     return {
@@ -125,7 +130,7 @@ export function createComfyUiClient({ baseUrl, apiPrefix = "", fetchImpl = globa
             const params = new URLSearchParams({ filename });
             if (typeof fileRef?.subfolder === "string" && fileRef.subfolder) params.set("subfolder", fileRef.subfolder);
             params.set("type", typeof fileRef?.type === "string" ? fileRef.type : "output");
-            const response = await request(`/view?${params.toString()}`);
+            const response = await request(`/view?${params.toString()}`, { signal: fileRef?.signal });
             const mimeType = response.headers.get("content-type")?.split(";", 1)[0] || "application/octet-stream";
             return { bytes: Buffer.from(await response.arrayBuffer()), mimeType };
         },
@@ -305,23 +310,31 @@ function composeRequestSignal(callerSignal, timeoutMs) {
 
     const timeoutController = new AbortController();
     const timeout = setTimeout(() => timeoutController.abort(timeoutError()), timeoutMs);
-    timeout.unref?.();
 
     if (!callerSignal) {
+        const cleanup = () => {
+            clearTimeout(timeout);
+            timeoutController.signal.removeEventListener("abort", cleanup);
+        };
+        if (timeoutController.signal.aborted) cleanup();
+        else timeoutController.signal.addEventListener("abort", cleanup, { once: true });
         return {
             signal: timeoutController.signal,
-            cleanup() {
-                clearTimeout(timeout);
-            },
+            cleanup,
         };
     }
 
     if (typeof AbortSignal !== "undefined" && typeof AbortSignal.any === "function") {
+        const signal = AbortSignal.any([callerSignal, timeoutController.signal]);
+        const cleanup = () => {
+            clearTimeout(timeout);
+            signal.removeEventListener("abort", cleanup);
+        };
+        if (signal.aborted) cleanup();
+        else signal.addEventListener("abort", cleanup, { once: true });
         return {
-            signal: AbortSignal.any([callerSignal, timeoutController.signal]),
-            cleanup() {
-                clearTimeout(timeout);
-            },
+            signal,
+            cleanup,
         };
     }
 
@@ -331,13 +344,17 @@ function composeRequestSignal(callerSignal, timeoutMs) {
     else callerSignal.addEventListener("abort", abortFromCaller, { once: true });
     const abortFromTimeout = () => controller.abort(timeoutController.signal.reason);
     timeoutController.signal.addEventListener("abort", abortFromTimeout, { once: true });
+    const cleanup = () => {
+        clearTimeout(timeout);
+        callerSignal.removeEventListener("abort", abortFromCaller);
+        timeoutController.signal.removeEventListener("abort", abortFromTimeout);
+        controller.signal.removeEventListener("abort", cleanup);
+    };
+    if (controller.signal.aborted) cleanup();
+    else controller.signal.addEventListener("abort", cleanup, { once: true });
     return {
         signal: controller.signal,
-        cleanup() {
-            clearTimeout(timeout);
-            callerSignal.removeEventListener("abort", abortFromCaller);
-            timeoutController.signal.removeEventListener("abort", abortFromTimeout);
-        },
+        cleanup,
     };
 }
 
@@ -348,6 +365,57 @@ function timeoutError() {
     return error;
 }
 
+function createManagedResponse(response, signal, cleanup) {
+    let cleaned = false;
+    const finish = () => {
+        if (cleaned) return;
+        cleaned = true;
+        cleanup();
+    };
+    const readers = new Set(["arrayBuffer", "blob", "bytes", "formData", "json", "text"]);
+    return new Proxy(response, {
+        get(target, property) {
+            if (readers.has(property)) return (...args) => readResponseBody(target, property, signal, finish, args);
+            const value = Reflect.get(target, property, target);
+            return typeof value === "function" ? value.bind(target) : value;
+        },
+    });
+}
+
+async function readResponseBody(response, method, signal, cleanup, args = []) {
+    try {
+        return await raceWithAbort(
+            Promise.resolve().then(() => response[method](...args)),
+            signal,
+        );
+    } finally {
+        cleanup();
+    }
+}
+
+function raceWithAbort(operation, signal) {
+    if (!signal) return operation;
+    return new Promise((resolve, reject) => {
+        let settled = false;
+        const finish = (callback, value) => {
+            if (settled) return;
+            settled = true;
+            signal.removeEventListener("abort", abort);
+            callback(value);
+        };
+        const abort = () => finish(reject, signal.reason ?? createAbortError());
+        if (signal.aborted) {
+            abort();
+            return;
+        }
+        signal.addEventListener("abort", abort, { once: true });
+        operation.then(
+            (value) => finish(resolve, value),
+            (error) => finish(reject, error),
+        );
+    });
+}
+
 async function parseJson(response, code) {
     try {
         return await response.json();
@@ -356,9 +424,9 @@ async function parseJson(response, code) {
     }
 }
 
-async function responseErrorMessage(response) {
+async function responseErrorMessage(response, signal) {
     try {
-        return (await response?.text?.()) || "upstream error";
+        return (await readResponseBody(response, "text", signal, () => {})) || "upstream error";
     } catch {
         return "upstream error";
     }

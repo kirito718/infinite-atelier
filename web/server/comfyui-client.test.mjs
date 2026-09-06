@@ -77,6 +77,77 @@ test("caller abort still cancels a request before its timeout", async () => {
     assert.equal(capturedSignal?.aborted, true);
 });
 
+test("times out a stalled JSON body after fetch has returned headers", async () => {
+    let capturedSignal;
+    const client = createComfyUiClient({
+        baseUrl: "http://comfyui.internal:8188",
+        timeoutMs: 10,
+        fetchImpl: (_url, init) => {
+            capturedSignal = init.signal;
+            return Promise.resolve({
+                ok: true,
+                status: 200,
+                headers: new Headers({ "content-type": "application/json" }),
+                json: () => new Promise(() => {}),
+            });
+        },
+        websocketFactory: unavailableWebSocket,
+    });
+
+    const pending = client.queuePrompt({ prompt: { 3: {} }, clientId: "client-1", promptId: "prompt-1" });
+    await assert.rejects(pending, (error) => error.code === "COMFYUI_QUEUE_FAILED" && error.cause?.name === "TimeoutError");
+    assert.equal(capturedSignal?.aborted, true);
+});
+
+test("applies the body timeout to upload, history, and output readers", async () => {
+    const client = createComfyUiClient({
+        baseUrl: "http://comfyui.internal:8188",
+        timeoutMs: 10,
+        fetchImpl: (url) =>
+            Promise.resolve(
+                url.includes("/view?")
+                    ? { ok: true, status: 200, headers: new Headers({ "content-type": "image/png" }), arrayBuffer: () => new Promise(() => {}) }
+                    : { ok: true, status: 200, headers: new Headers({ "content-type": "application/json" }), json: () => new Promise(() => {}) },
+            ),
+        websocketFactory: unavailableWebSocket,
+    });
+
+    const errors = await Promise.all([
+        client.uploadImage({ bytes: new Uint8Array([1]), filename: "pose.png", mimeType: "image/png" }).catch((error) => error),
+        client.getHistory("prompt-1").catch((error) => error),
+        client.getOutput({ filename: "result.png" }).catch((error) => error),
+    ]);
+    assert.deepEqual(
+        errors.slice(0, 2).map((error) => error.code),
+        ["COMFYUI_UPLOAD_FAILED", "COMFYUI_HISTORY_FAILED"],
+    );
+    assert.equal(errors[2].name, "TimeoutError");
+});
+
+test("caller abort rejects a stalled binary response body", async () => {
+    const controller = new AbortController();
+    let capturedSignal;
+    const client = createComfyUiClient({
+        baseUrl: "http://comfyui.internal:8188",
+        timeoutMs: 1_000,
+        fetchImpl: (_url, init) => {
+            capturedSignal = init.signal;
+            return Promise.resolve({
+                ok: true,
+                status: 200,
+                headers: new Headers({ "content-type": "image/png" }),
+                arrayBuffer: () => new Promise(() => {}),
+            });
+        },
+        websocketFactory: unavailableWebSocket,
+    });
+
+    const pending = client.getOutput({ filename: "result.png", signal: controller.signal });
+    controller.abort();
+    await assert.rejects(pending, (error) => error.name === "AbortError");
+    assert.equal(capturedSignal?.aborted, true);
+});
+
 test("queues a prompt with request-scoped client and prompt identifiers", async () => {
     const calls = [];
     const client = createComfyUiClient({
