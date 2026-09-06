@@ -9,7 +9,7 @@ import {
 import { MainViewport, CameraPreview } from './Viewport.jsx'
 import { ShotsPanel } from './ShotsPanel.jsx'
 import { JOINT_DEFINITIONS, JOINT_GROUPS, RIG_PRESET_GROUPS, RIG_PRESET_OPTIONS, cloneJointPose, interpolateJointPose, normalizePoseId, poseCanLoop, poseForObject, presetJoints, presetPhase, presetRoot } from './rig.js'
-import { validateControlCaptureResult } from './control-passes.js'
+import { controlPassCamera, isCaptureBusy, validateControlCaptureResult } from './control-passes.js'
 
 const CAMERA_ID = '__shot_camera__'
 // When embedded with a ?key=... query (canvas director nodes), scope storage per node so multiple instances do not share a project.
@@ -1959,7 +1959,7 @@ export default function App() {
     else setToast(cached ? '工程已保存到浏览器' : '浏览器保存空间不足，请使用“导出工程”备份')
   }
   const handleCaptureImage = async () => {
-    if (exportLockRef.current || exporting || capturingImage) return
+    if (isCaptureBusy({ lock: exportLockRef.current, video: exporting, image: capturingImage, control: Boolean(controlCapture) })) return
     exportLockRef.current = true
     setPlaying(false)
     imageCaptureCanvasRef.current = null
@@ -2000,7 +2000,7 @@ export default function App() {
     }
   }
   const captureControlPasses = useCallback(async ({ shotId, frame, width, height, passes }) => {
-    if (controlCaptureLockRef.current || exportLockRef.current || exporting || capturingImage) {
+    if (isCaptureBusy({ lock: exportLockRef.current || controlCaptureLockRef.current, video: exporting, image: capturingImage, control: Boolean(controlCapture) })) {
       const error = new Error('已有控制图捕获正在进行')
       error.code = 'CAPTURE_IN_PROGRESS'
       throw error
@@ -2019,11 +2019,13 @@ export default function App() {
     }
 
     controlCaptureLockRef.current = true
+    exportLockRef.current = true
     const wasPlaying = playingRef.current
     setPlaying(false)
     controlCaptureCanvasRefs.current = { pose: null, depth: null }
     const captureFrame = clamp(normalizeFrameNumber(frame), 0, totalFrames)
-    const captureCamera = keyframes.length ? cameraAtFrame(keyframes, captureFrame, camera.aspectRatio) : camera
+    const shotCamera = keyframes.length ? cameraAtFrame(keyframes, captureFrame, camera.aspectRatio) : camera
+    const captureCamera = controlPassCamera(shotCamera, { width: outputWidth, height: outputHeight })
     const captureObjects = hasObjectAnimation
       ? objectsAtFrame(objects, characterKeyframes, captureFrame, fps)
       : objects
@@ -2072,8 +2074,9 @@ export default function App() {
       controlCaptureCanvasRefs.current = { pose: null, depth: null }
       setPlaying(wasPlaying)
       controlCaptureLockRef.current = false
+      exportLockRef.current = false
     }
-  }, [activeShotId, camera, capturingImage, characterKeyframes, exporting, fps, hasObjectAnimation, keyframes, objects, totalFrames])
+  }, [activeShotId, camera, capturingImage, characterKeyframes, controlCapture, exporting, fps, hasObjectAnimation, keyframes, objects, totalFrames])
 
   useEffect(() => {
     postDirectorMessage({
@@ -2122,7 +2125,7 @@ export default function App() {
   }, [captureControlPasses])
 
   const handleExportMp4 = async () => {
-    if (exportLockRef.current || exporting || capturingImage) return
+    if (isCaptureBusy({ lock: exportLockRef.current, video: exporting, image: capturingImage, control: Boolean(controlCapture) })) return
     exportLockRef.current = true
     const nextExportFrameCount = totalFrames
     const originalFrame = currentFrameRef.current
@@ -2260,7 +2263,7 @@ export default function App() {
   }
 
   return (
-    <main className="app-shell" aria-busy={exporting || capturingImage}>
+    <main className="app-shell" aria-busy={exporting || capturingImage || Boolean(controlCapture)}>
       <header className="topbar">
         <div className="brand-mark">
           <span className="brand-glyph"><img src={BRAND_MARK_URL} alt="" /></span>
@@ -2277,9 +2280,9 @@ export default function App() {
         </nav>
         <div className="project-title"><i className={`status-dot ${saveStatus === '保存中…' ? '' : 'live'}`} /><button type="button" onClick={() => setSettingsOpen(true)} title="打开时间轴设置"><span>{settings.name}</span><Settings2 size={12} /></button><small>{activeShot?.name} · {saveStatus}</small></div>
         <div className="export-actions">
-          <button className="project-export-button" onClick={() => saveProject({ download: true })} disabled={exporting || capturingImage}><Download size={14} /> 导出工程</button>
-          <button className="project-export-button capture-image-button" onClick={handleCaptureImage} disabled={exporting || capturingImage}><FileImage size={14} /> {capturingImage ? '截图中…' : '截图 PNG'}</button>
-          <button className="export-button" onClick={handleExportMp4} disabled={exporting || capturingImage}><FileVideo2 size={14} /> {exporting ? `${exportProgress}%` : '导出 MP4'}</button>
+          <button className="project-export-button" onClick={() => saveProject({ download: true })} disabled={exporting || capturingImage || Boolean(controlCapture)}><Download size={14} /> 导出工程</button>
+          <button className="project-export-button capture-image-button" onClick={handleCaptureImage} disabled={exporting || capturingImage || Boolean(controlCapture)}><FileImage size={14} /> {capturingImage ? '截图中…' : '截图 PNG'}</button>
+          <button className="export-button" onClick={handleExportMp4} disabled={exporting || capturingImage || Boolean(controlCapture)}><FileVideo2 size={14} /> {exporting ? `${exportProgress}%` : '导出 MP4'}</button>
         </div>
       </header>
 

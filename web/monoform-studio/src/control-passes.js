@@ -20,9 +20,25 @@ export const poseConnections = Object.freeze([
 ])
 
 const CONTROL_RENDER_MODES = new Set(['beauty', 'pose', 'depth'])
+const REQUIRED_CONTROL_PASSES = Object.freeze(['pose', 'depth'])
 
 export function isControlRenderMode(value) {
   return CONTROL_RENDER_MODES.has(value)
+}
+
+export function isCaptureBusy({ lock = false, image = false, video = false, control = false } = {}) {
+  return Boolean(lock || image || video || control)
+}
+
+export function controlPassCamera(camera, { width, height }) {
+  const outputWidth = Math.max(1, Math.round(finite(Number(width))))
+  const outputHeight = Math.max(1, Math.round(finite(Number(height))))
+  return {
+    ...camera,
+    aspectRatio: `${outputWidth}:${outputHeight}`,
+    near: 0.05,
+    far: 200,
+  }
 }
 
 export function validateControlCaptureResult(result, request) {
@@ -31,7 +47,9 @@ export function validateControlCaptureResult(result, request) {
   const height = Number(request?.height)
   if (!result || !Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1) return false
 
-  return requestedPasses.every(kind => {
+  if (requestedPasses.length !== REQUIRED_CONTROL_PASSES.length || REQUIRED_CONTROL_PASSES.some(kind => !requestedPasses.includes(kind))) return false
+
+  return REQUIRED_CONTROL_PASSES.every(kind => {
     const pass = result[kind]
     return (kind === 'pose' || kind === 'depth')
       && pass?.blob instanceof Blob

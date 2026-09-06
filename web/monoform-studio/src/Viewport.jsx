@@ -1286,6 +1286,8 @@ function PreviewCameraController({ cameraData, cameraAspect }) {
     if (Math.abs(camera.fov - fov) > 0.01 || Math.abs(camera.aspect - nextAspect) > 0.0001) {
       camera.fov = fov
       camera.aspect = nextAspect
+      camera.near = Number.isFinite(cameraData.near) ? cameraData.near : 0.05
+      camera.far = Number.isFinite(cameraData.far) ? cameraData.far : 200
       camera.updateProjectionMatrix()
     }
   })
@@ -1413,7 +1415,7 @@ function DepthPreviewScene({ objects, cameraData, cameraAspect, animationTime })
   return (
     <>
       <color attach="background" args={['#000000']} />
-      <LinearDepthMaterial near={0.05} far={200} />
+      <LinearDepthMaterial near={cameraData.near || 0.05} far={cameraData.far || 200} />
       {objects.map(object => <SceneObject key={object.id} data={object} animationTime={animationTime} preview />)}
       <PreviewCameraController cameraData={cameraData} cameraAspect={cameraAspect} />
     </>
@@ -1456,7 +1458,7 @@ export function CameraPreview({ objects, cameraData, cameraAspect, lighting, bac
       dpr={exportMode ? 1 : [1, 1.5]}
       camera={mode === 'pose'
         ? { position: [0, 0, 1], near: 0, far: 2 }
-        : { position: cameraData.position, fov: 40, aspect: cameraAspect, near: 0.05, far: 200 }}
+        : { position: cameraData.position, fov: 40, aspect: cameraAspect, near: cameraData.near || 0.05, far: cameraData.far || 200 }}
       orthographic={mode === 'pose'}
       gl={{ alpha: mode !== 'pose', antialias: true, preserveDrawingBuffer: exportMode || Boolean(onCanvasReady), toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 0.9 }}
       onCreated={({ gl }) => onCanvasReady?.(gl.domElement)}

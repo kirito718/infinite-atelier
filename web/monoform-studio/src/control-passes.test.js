@@ -4,6 +4,8 @@ import test from 'node:test'
 import {
   OPENPOSE_KEYPOINTS,
   clampDepth,
+  controlPassCamera,
+  isCaptureBusy,
   isControlRenderMode,
   poseConnections,
   projectPoseKeypoints,
@@ -89,4 +91,23 @@ test('requires requested pose and depth passes to match capture dimensions', () 
   assert.equal(validateControlCaptureResult(capture, { passes: ['pose', 'depth'], width: 640, height: 480 }), true)
   assert.equal(validateControlCaptureResult({ ...capture, depth: { ...pass, height: 479 } }, { passes: ['pose', 'depth'], width: 640, height: 480 }), false)
   assert.equal(validateControlCaptureResult({ ...capture, depth: undefined }, { passes: ['pose', 'depth'], width: 640, height: 480 }), false)
+  assert.equal(validateControlCaptureResult(capture, { passes: [], width: 640, height: 480 }), false)
+  assert.equal(validateControlCaptureResult(capture, { passes: ['pose'], width: 640, height: 480 }), false)
+})
+
+test('derives identical pose and depth camera projection inputs from requested output dimensions', () => {
+  const captureCamera = controlPassCamera(camera, { width: 1024, height: 1024 })
+
+  assert.equal(captureCamera.aspectRatio, '1024:1024')
+  assert.equal(captureCamera.near, 0.05)
+  assert.equal(captureCamera.far, 200)
+  assert.equal(captureCamera.focalLength, camera.focalLength)
+})
+
+test('shares a busy guard across image, video, and control capture operations', () => {
+  assert.equal(isCaptureBusy({}), false)
+  assert.equal(isCaptureBusy({ lock: true }), true)
+  assert.equal(isCaptureBusy({ image: true }), true)
+  assert.equal(isCaptureBusy({ video: true }), true)
+  assert.equal(isCaptureBusy({ control: true }), true)
 })
