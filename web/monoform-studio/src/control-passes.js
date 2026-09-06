@@ -19,6 +19,28 @@ export const poseConnections = Object.freeze([
   ['rightHip', 'leftHip'],
 ])
 
+const CONTROL_RENDER_MODES = new Set(['beauty', 'pose', 'depth'])
+
+export function isControlRenderMode(value) {
+  return CONTROL_RENDER_MODES.has(value)
+}
+
+export function validateControlCaptureResult(result, request) {
+  const requestedPasses = request?.passes || []
+  const width = Number(request?.width)
+  const height = Number(request?.height)
+  if (!result || !Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1) return false
+
+  return requestedPasses.every(kind => {
+    const pass = result[kind]
+    return (kind === 'pose' || kind === 'depth')
+      && pass?.blob instanceof Blob
+      && pass.mimeType === 'image/png'
+      && pass.width === width
+      && pass.height === height
+  })
+}
+
 const REST_JOINTS = Object.freeze({
   mixamorigHips: { parent: null, position: [0, 1.07, 0] },
   mixamorigSpine: { parent: 'mixamorigHips', position: [0, 0.2, 0] },
@@ -149,15 +171,17 @@ export function clampDepth(value) {
   return Math.min(1, Math.max(0, value))
 }
 
-export function projectPoseKeypoints({ object, camera, width, height }) {
+export function projectPoseKeypoints({ object, camera, width, height, worldJointPositions }) {
   const outputWidth = Math.max(1, Math.round(finite(Number(width))))
   const outputHeight = Math.max(1, Math.round(finite(Number(height))))
   const transforms = worldJointTransforms(object)
 
   return OPENPOSE_JOINT_MAPPING.map(({ name, jointId, offset }) => {
     const transform = transforms.get(jointId)
-    if (!transform) return { name, x: 0, y: 0, visible: false }
-    const point = addVectors(transform.position, rotateVector(vector3(offset), transform.rotation))
+    const suppliedPosition = worldJointPositions?.[jointId]
+    const livePosition = Array.isArray(suppliedPosition) && suppliedPosition.length >= 3 ? vector3(suppliedPosition) : null
+    if (!transform && !livePosition) return { name, x: 0, y: 0, visible: false }
+    const point = livePosition || addVectors(transform.position, rotateVector(vector3(offset), transform.rotation))
     return { name, ...projectPoint(point, camera, outputWidth, outputHeight) }
   })
 }

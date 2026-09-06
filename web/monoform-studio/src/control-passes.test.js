@@ -4,8 +4,10 @@ import test from 'node:test'
 import {
   OPENPOSE_KEYPOINTS,
   clampDepth,
+  isControlRenderMode,
   poseConnections,
   projectPoseKeypoints,
+  validateControlCaptureResult,
 } from './control-passes.js'
 
 const camera = {
@@ -70,4 +72,21 @@ test('clamps depth values to the unit interval', () => {
   assert.equal(clampDepth(-0.01), 0)
   assert.equal(clampDepth(0.25), 0.25)
   assert.equal(clampDepth(1.01), 1)
+})
+
+test('accepts only supported control render modes', () => {
+  assert.equal(isControlRenderMode('beauty'), true)
+  assert.equal(isControlRenderMode('pose'), true)
+  assert.equal(isControlRenderMode('depth'), true)
+  assert.equal(isControlRenderMode('normal'), false)
+  assert.equal(isControlRenderMode(undefined), false)
+})
+
+test('requires requested pose and depth passes to match capture dimensions', () => {
+  const pass = { blob: new Blob(['pass'], { type: 'image/png' }), mimeType: 'image/png', width: 640, height: 480 }
+  const capture = { shotId: 'shot-01', frame: 12, pose: pass, depth: { ...pass } }
+
+  assert.equal(validateControlCaptureResult(capture, { passes: ['pose', 'depth'], width: 640, height: 480 }), true)
+  assert.equal(validateControlCaptureResult({ ...capture, depth: { ...pass, height: 479 } }, { passes: ['pose', 'depth'], width: 640, height: 480 }), false)
+  assert.equal(validateControlCaptureResult({ ...capture, depth: undefined }, { passes: ['pose', 'depth'], width: 640, height: 480 }), false)
 })

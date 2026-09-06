@@ -9,6 +9,7 @@ import {
 import { MainViewport, CameraPreview } from './Viewport.jsx'
 import { ShotsPanel } from './ShotsPanel.jsx'
 import { JOINT_DEFINITIONS, JOINT_GROUPS, RIG_PRESET_GROUPS, RIG_PRESET_OPTIONS, cloneJointPose, interpolateJointPose, normalizePoseId, poseCanLoop, poseForObject, presetJoints, presetPhase, presetRoot } from './rig.js'
+import { validateControlCaptureResult } from './control-passes.js'
 
 const CAMERA_ID = '__shot_camera__'
 // When embedded with a ?key=... query (canvas director nodes), scope storage per node so multiple instances do not share a project.
@@ -75,6 +76,13 @@ const customAspectFrom = value => {
   return customAspectValue(parts[0] || 16, parts[1] || 9)
 }
 const nextPaint = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+
+const DIRECTOR_PROTOCOL = 'atelier-monoform'
+const DIRECTOR_PROTOCOL_VERSION = 1
+const directorParentOrigin = () => window.location.origin
+const postDirectorMessage = message => {
+  if (window.parent && window.parent !== window) window.parent.postMessage(message, directorParentOrigin())
+}
 
 function exportDimensionsForAspect(aspectRatio) {
   const ratio = aspectValue(aspectRatio)
@@ -1256,6 +1264,7 @@ export default function App() {
   const [playing, setPlaying] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [capturingImage, setCapturingImage] = useState(false)
+  const [controlCapture, setControlCapture] = useState(null)
   const [exportReferenceBackground, setExportReferenceBackground] = useState(null)
   const [monitorReferenceBackground, setMonitorReferenceBackground] = useState(null)
   const [exportProgress, setExportProgress] = useState(0)
@@ -1273,12 +1282,15 @@ export default function App() {
   const [, setHistoryVersion] = useState(0)
   const loadRef = useRef(null)
   const playStartRef = useRef(null)
+  const playingRef = useRef(false)
   const currentFrameRef = useRef(0)
   const exportCanvasRef = useRef(null)
   const imageCaptureCanvasRef = useRef(null)
+  const controlCaptureCanvasRefs = useRef({ pose: null, depth: null })
   const monitorCanvasRef = useRef(null)
   const editorViewRef = useRef(editorView)
   const exportLockRef = useRef(false)
+  const controlCaptureLockRef = useRef(false)
   const historyRef = useRef({ past: [], future: [], last: '', timer: null, restoring: false })
   const latestProjectRef = useRef(null)
 
@@ -1334,6 +1346,10 @@ export default function App() {
   useEffect(() => {
     currentFrameRef.current = currentFrame
   }, [currentFrame])
+
+  useEffect(() => {
+    playingRef.current = playing
+  }, [playing])
 
   useEffect(() => {
     let active = true
@@ -1983,6 +1999,128 @@ export default function App() {
       exportLockRef.current = false
     }
   }
+  const captureControlPasses = useCallback(async ({ shotId, frame, width, height, passes }) => {
+    if (controlCaptureLockRef.current || exportLockRef.current || exporting || capturingImage) {
+      const error = new Error('已有控制图捕获正在进行')
+      error.code = 'CAPTURE_IN_PROGRESS'
+      throw error
+    }
+    if (!Array.isArray(passes) || !passes.includes('pose') || !passes.includes('depth')) {
+      const error = new Error('控制图捕获需要同时请求 Pose 和 Depth')
+      error.code = 'UNSUPPORTED_CAPABILITY'
+      throw error
+    }
+    const outputWidth = Math.max(1, Math.round(Number(width)))
+    const outputHeight = Math.max(1, Math.round(Number(height)))
+    if (!Number.isFinite(outputWidth) || !Number.isFinite(outputHeight)) {
+      const error = new Error('控制图尺寸无效')
+      error.code = 'INVALID_REQUEST'
+      throw error
+    }
+
+    controlCaptureLockRef.current = true
+    const wasPlaying = playingRef.current
+    setPlaying(false)
+    controlCaptureCanvasRefs.current = { pose: null, depth: null }
+    const captureFrame = clamp(normalizeFrameNumber(frame), 0, totalFrames)
+    const captureCamera = keyframes.length ? cameraAtFrame(keyframes, captureFrame, camera.aspectRatio) : camera
+    const captureObjects = hasObjectAnimation
+      ? objectsAtFrame(objects, characterKeyframes, captureFrame, fps)
+      : objects
+
+    try {
+      setControlCapture({
+        shotId: shotId || activeShotId,
+        frame: captureFrame,
+        width: outputWidth,
+        height: outputHeight,
+        objects: captureObjects,
+        camera: captureCamera,
+      })
+      let ready = false
+      for (let attempt = 0; attempt < 90; attempt += 1) {
+        await nextPaint()
+        const { pose, depth } = controlCaptureCanvasRefs.current
+        if (pose?.width === outputWidth && pose?.height === outputHeight && depth?.width === outputWidth && depth?.height === outputHeight) {
+          ready = true
+          break
+        }
+      }
+      if (!ready) throw new Error('控制图画面初始化失败')
+      await nextPaint()
+      const toPng = canvas => new Promise((resolve, reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('控制图 PNG 生成失败')), 'image/png'))
+      const [poseBlob, depthBlob] = await Promise.all([
+        toPng(controlCaptureCanvasRefs.current.pose),
+        toPng(controlCaptureCanvasRefs.current.depth),
+      ])
+      const result = {
+        shotId: shotId || activeShotId,
+        frame: captureFrame,
+        pose: { blob: poseBlob, mimeType: 'image/png', width: outputWidth, height: outputHeight },
+        depth: { blob: depthBlob, mimeType: 'image/png', width: outputWidth, height: outputHeight },
+        camera: {
+          position: [...captureCamera.position],
+          rotation: [...captureCamera.rotation],
+          focalLength: captureCamera.focalLength,
+          aspectRatio: captureCamera.aspectRatio,
+        },
+      }
+      if (!validateControlCaptureResult(result, { passes, width: outputWidth, height: outputHeight })) throw new Error('控制图结果校验失败')
+      return result
+    } finally {
+      setControlCapture(null)
+      controlCaptureCanvasRefs.current = { pose: null, depth: null }
+      setPlaying(wasPlaying)
+      controlCaptureLockRef.current = false
+    }
+  }, [activeShotId, camera, capturingImage, characterKeyframes, exporting, fps, hasObjectAnimation, keyframes, objects, totalFrames])
+
+  useEffect(() => {
+    postDirectorMessage({
+      protocol: DIRECTOR_PROTOCOL,
+      version: DIRECTOR_PROTOCOL_VERSION,
+      source: 'monoform',
+      type: 'monoform:ready',
+      payload: {
+        capabilities: ['capture-image', 'capture-pose', 'capture-depth'],
+        projectKey: EMBED_KEY || undefined,
+      },
+    })
+  }, [])
+
+  useEffect(() => {
+    const handleDirectorMessage = async event => {
+      if (event.origin !== directorParentOrigin() || event.source !== window.parent) return
+      const data = event.data
+      if (data?.protocol !== DIRECTOR_PROTOCOL || data?.version !== DIRECTOR_PROTOCOL_VERSION || data?.source !== 'atelier' || data?.type !== 'control.capture' || !data.requestId) return
+      try {
+        const result = await captureControlPasses(data.payload || {})
+        postDirectorMessage({
+          protocol: DIRECTOR_PROTOCOL,
+          version: DIRECTOR_PROTOCOL_VERSION,
+          source: 'monoform',
+          type: 'control.result',
+          requestId: data.requestId,
+          payload: result,
+        })
+      } catch (error) {
+        postDirectorMessage({
+          protocol: DIRECTOR_PROTOCOL,
+          version: DIRECTOR_PROTOCOL_VERSION,
+          source: 'monoform',
+          type: 'monoform:error',
+          requestId: data.requestId,
+          payload: {
+            code: error?.code || 'CAPTURE_FAILED',
+            message: error?.message || '控制图捕获失败',
+          },
+        })
+      }
+    }
+    window.addEventListener('message', handleDirectorMessage)
+    return () => window.removeEventListener('message', handleDirectorMessage)
+  }, [captureControlPasses])
+
   const handleExportMp4 = async () => {
     if (exportLockRef.current || exporting || capturingImage) return
     exportLockRef.current = true
@@ -2237,6 +2375,34 @@ export default function App() {
       {capturingImage && (
         <div className="export-render-surface" style={{ width: exportDimensions.width, height: exportDimensions.height }} aria-hidden="true">
           <CameraPreview objects={animatedObjects} animationTime={currentFrame / fps} cameraData={displayCamera} cameraAspect={exportDimensions.width / exportDimensions.height} lighting={lighting} exportMode backgroundCanvas={exportReferenceBackground} onCanvasReady={canvas => { imageCaptureCanvasRef.current = canvas }} />
+        </div>
+      )}
+      {controlCapture && (
+        <div className="export-render-surface" aria-hidden="true">
+          <div style={{ width: controlCapture.width, height: controlCapture.height }}>
+            <CameraPreview
+              objects={controlCapture.objects}
+              animationTime={controlCapture.frame / fps}
+              cameraData={controlCapture.camera}
+              cameraAspect={controlCapture.width / controlCapture.height}
+              lighting={lighting}
+              exportMode
+              renderMode="pose"
+              onCanvasReady={canvas => { controlCaptureCanvasRefs.current.pose = canvas }}
+            />
+          </div>
+          <div style={{ width: controlCapture.width, height: controlCapture.height }}>
+            <CameraPreview
+              objects={controlCapture.objects}
+              animationTime={controlCapture.frame / fps}
+              cameraData={controlCapture.camera}
+              cameraAspect={controlCapture.width / controlCapture.height}
+              lighting={lighting}
+              exportMode
+              renderMode="depth"
+              onCanvasReady={canvas => { controlCaptureCanvasRefs.current.depth = canvas }}
+            />
+          </div>
         </div>
       )}
       {exporting && (
