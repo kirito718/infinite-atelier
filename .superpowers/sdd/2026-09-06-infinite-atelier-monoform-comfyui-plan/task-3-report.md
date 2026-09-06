@@ -73,3 +73,28 @@ The two Vite builds retain pre-existing chunk-size/dynamic-import warnings; neit
 | `git diff --check` | PASS |
 
 The same existing chunk-size/dynamic-import warnings remain; no new build errors were reported.
+
+## Review-fix round 2: shared projection math
+
+### Root cause and correction
+
+Depth used a fixed 24mm vertical sensor to calculate its Three.js FOV, while Pose used a 36mm horizontal sensor and derived sensor height from the aspect ratio. Shared camera metadata could not make those two formulas agree.
+
+- Added `captureProjectionSpec()` as the single control-pass projection source: 36mm sensor width, `sensorHeight = 36 / aspect`, original focal length, shared near/far, and derived vertical FOV.
+- Pose projection now uses that spec for its NDC calculations.
+- Depth initializes and updates its Three.js camera from exactly the same spec. This applies only to the Depth control pass, preserving the existing beauty-preview framing.
+- Added `isV1ControlPassList()` and use it at both request validation and result validation; extra pass names are rejected.
+
+### Regression evidence
+
+- The focused test obtains the Pose and Depth projection specs for a square request from a source camera and asserts deep equality, including the 36mm-derived sensor height and exact vertical FOV.
+- The focused pass-list test covers reordered valid passes and rejects partial or extra v1 lists.
+
+### Round-2 verification
+
+| Command | Result |
+| --- | --- |
+| `cd web && node --test monoform-studio/src/control-passes.test.js` | PASS: 9 tests |
+| `cd web && npm run build:monoform` | PASS |
+| `cd web && npm run build` | PASS |
+| `git diff --check` | PASS |

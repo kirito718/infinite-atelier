@@ -9,7 +9,7 @@ import {
 import { MainViewport, CameraPreview } from './Viewport.jsx'
 import { ShotsPanel } from './ShotsPanel.jsx'
 import { JOINT_DEFINITIONS, JOINT_GROUPS, RIG_PRESET_GROUPS, RIG_PRESET_OPTIONS, cloneJointPose, interpolateJointPose, normalizePoseId, poseCanLoop, poseForObject, presetJoints, presetPhase, presetRoot } from './rig.js'
-import { controlPassCamera, isCaptureBusy, validateControlCaptureResult } from './control-passes.js'
+import { controlPassCamera, isCaptureBusy, isV1ControlPassList, validateControlCaptureResult } from './control-passes.js'
 
 const CAMERA_ID = '__shot_camera__'
 // When embedded with a ?key=... query (canvas director nodes), scope storage per node so multiple instances do not share a project.
@@ -2005,7 +2005,7 @@ export default function App() {
       error.code = 'CAPTURE_IN_PROGRESS'
       throw error
     }
-    if (!Array.isArray(passes) || !passes.includes('pose') || !passes.includes('depth')) {
+    if (!isV1ControlPassList(passes)) {
       const error = new Error('控制图捕获需要同时请求 Pose 和 Depth')
       error.code = 'UNSUPPORTED_CAPABILITY'
       throw error

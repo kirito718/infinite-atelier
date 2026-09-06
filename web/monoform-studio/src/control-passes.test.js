@@ -5,8 +5,10 @@ import {
   OPENPOSE_KEYPOINTS,
   clampDepth,
   controlPassCamera,
+  captureProjectionSpec,
   isCaptureBusy,
   isControlRenderMode,
+  isV1ControlPassList,
   poseConnections,
   projectPoseKeypoints,
   validateControlCaptureResult,
@@ -93,15 +95,26 @@ test('requires requested pose and depth passes to match capture dimensions', () 
   assert.equal(validateControlCaptureResult({ ...capture, depth: undefined }, { passes: ['pose', 'depth'], width: 640, height: 480 }), false)
   assert.equal(validateControlCaptureResult(capture, { passes: [], width: 640, height: 480 }), false)
   assert.equal(validateControlCaptureResult(capture, { passes: ['pose'], width: 640, height: 480 }), false)
+  assert.equal(validateControlCaptureResult(capture, { passes: ['pose', 'depth', 'normal'], width: 640, height: 480 }), false)
 })
 
-test('derives identical pose and depth camera projection inputs from requested output dimensions', () => {
+test('uses one 36mm-sensor projection spec for pose and depth at the requested output aspect', () => {
   const captureCamera = controlPassCamera(camera, { width: 1024, height: 1024 })
+  const poseProjection = captureProjectionSpec(captureCamera, 1024 / 1024)
+  const depthProjection = captureProjectionSpec(captureCamera, 1024 / 1024)
 
   assert.equal(captureCamera.aspectRatio, '1024:1024')
-  assert.equal(captureCamera.near, 0.05)
-  assert.equal(captureCamera.far, 200)
-  assert.equal(captureCamera.focalLength, camera.focalLength)
+  assert.deepEqual(poseProjection, depthProjection)
+  assert.equal(poseProjection.sensorWidth, 36)
+  assert.equal(poseProjection.sensorHeight, 36)
+  assert.equal(poseProjection.verticalFovDegrees, depthProjection.verticalFovDegrees)
+})
+
+test('requires exactly the v1 pose and depth pass list', () => {
+  assert.equal(isV1ControlPassList(['pose', 'depth']), true)
+  assert.equal(isV1ControlPassList(['depth', 'pose']), true)
+  assert.equal(isV1ControlPassList(['pose']), false)
+  assert.equal(isV1ControlPassList(['pose', 'depth', 'normal']), false)
 })
 
 test('shares a busy guard across image, video, and control capture operations', () => {

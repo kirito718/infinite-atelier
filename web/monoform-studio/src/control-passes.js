@@ -30,6 +30,12 @@ export function isCaptureBusy({ lock = false, image = false, video = false, cont
   return Boolean(lock || image || video || control)
 }
 
+export function isV1ControlPassList(passes) {
+  return Array.isArray(passes)
+    && passes.length === REQUIRED_CONTROL_PASSES.length
+    && REQUIRED_CONTROL_PASSES.every(kind => passes.includes(kind))
+}
+
 export function controlPassCamera(camera, { width, height }) {
   const outputWidth = Math.max(1, Math.round(finite(Number(width))))
   const outputHeight = Math.max(1, Math.round(finite(Number(height))))
@@ -41,13 +47,29 @@ export function controlPassCamera(camera, { width, height }) {
   }
 }
 
+export function captureProjectionSpec(camera, fallbackAspect) {
+  const aspect = parseAspect(camera?.aspectRatio, fallbackAspect)
+  const focalLength = Math.max(1, finite(Number(camera?.focalLength)) || 50)
+  const sensorWidth = 36
+  const sensorHeight = sensorWidth / aspect
+  return {
+    aspect,
+    focalLength,
+    sensorWidth,
+    sensorHeight,
+    verticalFovDegrees: Math.atan(sensorHeight / (2 * focalLength)) * 2 * 180 / Math.PI,
+    near: Number.isFinite(camera?.near) ? camera.near : 0.05,
+    far: Number.isFinite(camera?.far) ? camera.far : 200,
+  }
+}
+
 export function validateControlCaptureResult(result, request) {
   const requestedPasses = request?.passes || []
   const width = Number(request?.width)
   const height = Number(request?.height)
   if (!result || !Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1) return false
 
-  if (requestedPasses.length !== REQUIRED_CONTROL_PASSES.length || REQUIRED_CONTROL_PASSES.some(kind => !requestedPasses.includes(kind))) return false
+  if (!isV1ControlPassList(requestedPasses)) return false
 
   return REQUIRED_CONTROL_PASSES.every(kind => {
     const pass = result[kind]
@@ -163,12 +185,9 @@ function projectPoint(point, camera, width, height) {
   const depth = -cameraPoint[2]
   if (!(depth > 0)) return { x: 0, y: 0, visible: false }
 
-  const focalLength = Math.max(1, finite(Number(camera?.focalLength)) || 50)
-  const aspect = parseAspect(camera?.aspectRatio, width / height)
-  const sensorWidth = 36
-  const sensorHeight = sensorWidth / aspect
-  const ndcX = (cameraPoint[0] * focalLength) / (depth * sensorWidth / 2)
-  const ndcY = (cameraPoint[1] * focalLength) / (depth * sensorHeight / 2)
+  const projection = captureProjectionSpec(camera, width / height)
+  const ndcX = (cameraPoint[0] * projection.focalLength) / (depth * projection.sensorWidth / 2)
+  const ndcY = (cameraPoint[1] * projection.focalLength) / (depth * projection.sensorHeight / 2)
   const visible = Math.abs(ndcX) <= 1 && Math.abs(ndcY) <= 1
   const x = Math.min(width, Math.max(0, (ndcX + 1) * width / 2))
   const y = Math.min(height, Math.max(0, (1 - ndcY) * height / 2))

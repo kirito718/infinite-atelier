@@ -4,7 +4,7 @@ import { ContactShadows, Grid, OrbitControls, TransformControls, useGLTF } from 
 import * as THREE from 'three'
 import { clone as skeletonClone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { OPENPOSE_JOINT_MAPPING, poseForObject, presetDefinition } from './rig.js'
-import { isControlRenderMode, poseConnections, projectPoseKeypoints } from './control-passes.js'
+import { captureProjectionSpec, isControlRenderMode, poseConnections, projectPoseKeypoints } from './control-passes.js'
 
 const CAMERA_ID = '__shot_camera__'
 const BUILT_IN_MODEL_URL = `${import.meta.env.BASE_URL}models/xbot-animated.glb`
@@ -1276,18 +1276,19 @@ function EditorScene({ objects, selectedId, activeJoint, onSelect, onJointSelect
   )
 }
 
-function PreviewCameraController({ cameraData, cameraAspect }) {
+function PreviewCameraController({ cameraData, cameraAspect, controlProjection = false }) {
   const { camera, size } = useThree()
   useFrame(() => {
     camera.position.fromArray(cameraData.position)
     camera.rotation.set(...cameraData.rotation, 'XYZ')
-    const fov = THREE.MathUtils.radToDeg(2 * Math.atan(24 / (2 * cameraData.focalLength)))
-    const nextAspect = Number.isFinite(cameraAspect) && cameraAspect > 0 ? cameraAspect : size.width / Math.max(1, size.height)
+    const projection = controlProjection ? captureProjectionSpec(cameraData, cameraAspect) : null
+    const fov = projection?.verticalFovDegrees || THREE.MathUtils.radToDeg(2 * Math.atan(24 / (2 * cameraData.focalLength)))
+    const nextAspect = projection?.aspect || (Number.isFinite(cameraAspect) && cameraAspect > 0 ? cameraAspect : size.width / Math.max(1, size.height))
     if (Math.abs(camera.fov - fov) > 0.01 || Math.abs(camera.aspect - nextAspect) > 0.0001) {
       camera.fov = fov
       camera.aspect = nextAspect
-      camera.near = Number.isFinite(cameraData.near) ? cameraData.near : 0.05
-      camera.far = Number.isFinite(cameraData.far) ? cameraData.far : 200
+      camera.near = projection?.near || (Number.isFinite(cameraData.near) ? cameraData.near : 0.05)
+      camera.far = projection?.far || (Number.isFinite(cameraData.far) ? cameraData.far : 200)
       camera.updateProjectionMatrix()
     }
   })
@@ -1412,12 +1413,13 @@ function LinearDepthMaterial({ near, far }) {
 }
 
 function DepthPreviewScene({ objects, cameraData, cameraAspect, animationTime }) {
+  const projection = captureProjectionSpec(cameraData, cameraAspect)
   return (
     <>
       <color attach="background" args={['#000000']} />
-      <LinearDepthMaterial near={cameraData.near || 0.05} far={cameraData.far || 200} />
+      <LinearDepthMaterial near={projection.near} far={projection.far} />
       {objects.map(object => <SceneObject key={object.id} data={object} animationTime={animationTime} preview />)}
-      <PreviewCameraController cameraData={cameraData} cameraAspect={cameraAspect} />
+      <PreviewCameraController cameraData={cameraData} cameraAspect={cameraAspect} controlProjection />
     </>
   )
 }
@@ -1442,6 +1444,7 @@ export function MainViewport(props) {
 
 export function CameraPreview({ objects, cameraData, cameraAspect, lighting, backgroundCanvas = null, animationTime = 0, onCanvasReady, exportMode = false, renderMode = 'beauty' }) {
   const mode = isControlRenderMode(renderMode) ? renderMode : 'beauty'
+  const depthProjection = mode === 'depth' ? captureProjectionSpec(cameraData, cameraAspect) : null
   const poseWidth = Math.max(1, Math.round(cameraAspect >= 1 ? 1280 : 1280 * cameraAspect))
   const poseHeight = Math.max(1, Math.round(cameraAspect >= 1 ? 1280 / cameraAspect : 1280))
   const [liveJointPositions, setLiveJointPositions] = useState({})
@@ -1458,7 +1461,7 @@ export function CameraPreview({ objects, cameraData, cameraAspect, lighting, bac
       dpr={exportMode ? 1 : [1, 1.5]}
       camera={mode === 'pose'
         ? { position: [0, 0, 1], near: 0, far: 2 }
-        : { position: cameraData.position, fov: 40, aspect: cameraAspect, near: cameraData.near || 0.05, far: cameraData.far || 200 }}
+        : { position: cameraData.position, fov: depthProjection?.verticalFovDegrees || 40, aspect: depthProjection?.aspect || cameraAspect, near: depthProjection?.near || cameraData.near || 0.05, far: depthProjection?.far || cameraData.far || 200 }}
       orthographic={mode === 'pose'}
       gl={{ alpha: mode !== 'pose', antialias: true, preserveDrawingBuffer: exportMode || Boolean(onCanvasReady), toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 0.9 }}
       onCreated={({ gl }) => onCanvasReady?.(gl.domElement)}
