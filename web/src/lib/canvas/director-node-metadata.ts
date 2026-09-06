@@ -2,7 +2,7 @@ import { imageMetadata } from "./canvas-node-factory";
 import type { UploadedImage } from "@/services/image-storage";
 import type { ComfyUiJobStatus } from "@/types/comfyui";
 import type { DirectorControlPass } from "@/types/director";
-import type { CanvasNodeMetadata } from "@/types/canvas";
+import { CanvasNodeType, type CanvasNodeData, type CanvasNodeMetadata } from "@/types/canvas";
 
 /**
  * The task context needed to make a Director result auditable. Control passes
@@ -30,4 +30,10 @@ export function buildDirectorComfyMetadata(uploaded: UploadedImage, task: Direct
         directorFrame: task.frame,
         dimensions: { width: uploaded.width, height: uploaded.height },
     };
+}
+
+export function resolveDirectorRetry(node: CanvasNodeData, nodes: CanvasNodeData[]): { kind: "generic" } | { kind: "director"; nodeId: string } | { kind: "missing-director" } {
+    if (node.metadata?.generationProvider !== "comfyui") return { kind: "generic" };
+    const director = nodes.find((candidate) => candidate.id === node.metadata?.directorNodeId && candidate.type === CanvasNodeType.Director);
+    return director ? { kind: "director", nodeId: director.id } : { kind: "missing-director" };
 }

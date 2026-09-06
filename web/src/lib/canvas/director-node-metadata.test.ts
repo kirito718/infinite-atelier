@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { CanvasNodeType } from "@/types/canvas";
 import { createDirectorImageNode } from "./canvas-node-factory";
 import type { ComfyUiJobStatus } from "@/types/comfyui";
-import { buildDirectorComfyMetadata, type DirectorComfyTask } from "./director-node-metadata";
+import { buildDirectorComfyMetadata, resolveDirectorRetry, type DirectorComfyTask } from "./director-node-metadata";
 
 vi.hoisted(() => vi.stubGlobal("localStorage", { getItem: () => null }));
 
@@ -90,4 +90,21 @@ it("places the generated image beside the Director without treating its top-left
     expect(image.position).toEqual({ x: 472, y: 200 });
     expect(image.type).toBe(CanvasNodeType.Image);
     expect(image.metadata).toMatchObject({ status: "loading", generationProvider: "comfyui" });
+});
+
+it("routes ComfyUI result retries back to the originating Director, never the generic provider", () => {
+    const director = { id: "director-1", type: CanvasNodeType.Director, title: "Director", position: { x: 0, y: 0 }, width: 340, height: 240, metadata: {} };
+    const image = { ...director, id: "image-1", type: CanvasNodeType.Image, metadata: { generationProvider: "comfyui", directorNodeId: "director-1" } };
+    expect(resolveDirectorRetry(image, [director, image])).toEqual({ kind: "director", nodeId: "director-1" });
+    expect(resolveDirectorRetry(image, [image])).toEqual({ kind: "missing-director" });
+    expect(resolveDirectorRetry({ ...image, metadata: {} }, [director])).toEqual({ kind: "generic" });
+});
+
+it("keeps successive Director results visible instead of stacking them in the same coordinates", () => {
+    const director = { id: "director-1", type: CanvasNodeType.Director, title: "Director", position: { x: 100, y: 200 }, width: 340, height: 240, metadata: {} };
+    const first = createDirectorImageNode(director, { directorNodeId: director.id });
+    const second = createDirectorImageNode(director, { directorNodeId: director.id }, [first]);
+    expect(second.position).toEqual({ x: 472, y: 472 });
+    const unrelated = { ...first, metadata: { directorNodeId: "another-director" } };
+    expect(createDirectorImageNode(director, {}, [unrelated]).position).toEqual({ x: 472, y: 200 });
 });

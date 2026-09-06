@@ -91,7 +91,7 @@ import {
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio } from "@/types/media";
 import type { DirectorCaptureResult } from "@/types/director";
-import { buildDirectorComfyMetadata, type DirectorComfyTask } from "@/lib/canvas/director-node-metadata";
+import { buildDirectorComfyMetadata, resolveDirectorRetry, type DirectorComfyTask } from "@/lib/canvas/director-node-metadata";
 
 // Register built-in nodes in the shared registry once when the module loads.
 registerBuiltinNodes();
@@ -2416,6 +2416,18 @@ function AtelierCanvasPage() {
 
     const handleRetryNode = useCallback(
         async (node: CanvasNodeData, imageId?: string) => {
+            const directorRetry = resolveDirectorRetry(node, nodesRef.current);
+            if (directorRetry.kind === "director") {
+                // Control blobs are intentionally not stored in canvas JSON.
+                // Return to the correct Director for an explicit fresh capture,
+                // never silently switch this result to the generic image provider.
+                setDialogNodeId(directorRetry.nodeId);
+                return;
+            }
+            if (directorRetry.kind === "missing-director") {
+                message.warning("原导演节点已删除，请新建导演台并重新生成");
+                return;
+            }
             const sourceNode = findRetrySourceNode(node.id, nodesRef.current, connectionsRef.current) || node;
             const savedImageMetadata = node.type === CanvasNodeType.Image ? node.metadata : undefined;
             const hasSavedImageMetadata = Boolean(savedImageMetadata?.generationType);
@@ -2767,16 +2779,20 @@ function AtelierCanvasPage() {
                 return;
             }
             const prompt = director.metadata?.prompt?.trim() || "Photorealistic portrait, natural lighting, realistic skin texture, accurate anatomy, guided by the supplied pose and depth controls";
-            const child = createDirectorImageNode(director, {
-                source: "monoform",
-                generationProvider: "comfyui",
-                directorNodeId,
-                directorShotId: shotId,
-                directorFrame: frame,
-                workflowId: DIRECTOR_COMFY_WORKFLOW_ID,
-                prompt,
-                status: NODE_STATUS_LOADING,
-            });
+            const child = createDirectorImageNode(
+                director,
+                {
+                    source: "monoform",
+                    generationProvider: "comfyui",
+                    directorNodeId,
+                    directorShotId: shotId,
+                    directorFrame: frame,
+                    workflowId: DIRECTOR_COMFY_WORKFLOW_ID,
+                    prompt,
+                    status: NODE_STATUS_LOADING,
+                },
+                nodesRef.current,
+            );
             const controller = new AbortController();
             const request: DirectorGenerationRequest = { directorNodeId, resultNodeId: child.id, controller };
             directorGenerationRef.current = request;

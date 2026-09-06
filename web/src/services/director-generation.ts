@@ -71,6 +71,11 @@ export async function generateDirectorImage(input: ComfyUiJobCreate, options: Ge
         return { uploaded, task };
     } catch (error) {
         if (signal.aborted) {
+            // A lost POST response is ambiguous: it may have created a GPU job.
+            // A definite 4xx rejection is safe, but never report unknown work as stopped.
+            if (!taskId && !(error instanceof ComfyUiApiError && error.status >= 400 && error.status < 500)) {
+                throw new ComfyUiApiError("CANCEL_FAILED", "已停止本地等待，但创建响应丢失，无法确认上游任务状态；请检查 ComfyUI 队列", 502, true);
+            }
             try {
                 await cancelRemote();
             } catch {

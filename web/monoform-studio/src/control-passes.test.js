@@ -8,6 +8,7 @@ import {
   controlPassCamera,
   captureProjectionSpec,
   isCaptureBusy,
+  isControlPassSceneReady,
   isControlRenderMode,
   isV1ControlPassList,
   poseConnections,
@@ -156,4 +157,16 @@ test('encodes limb and joint identity using the standard OpenPose body palette',
   assert.deepEqual(drawing.joints.map(({ point, color }) => [point.name, color]), [
     ['nose', '#ff0000'], ['neck', '#ff5500'], ['rightShoulder', '#ffaa00'], ['leftShoulder', '#55ff00'],
   ])
+})
+
+
+test('does not capture a bind-pose fallback before every visible character reports its live rig', () => {
+  const people = [{ id: 'person-1', type: 'person' }, { id: 'person-2', type: 'person' }]
+  const bones = ['Head', 'Neck', 'RightArm', 'RightForeArm', 'RightHand', 'LeftArm', 'LeftForeArm', 'LeftHand', 'RightUpLeg', 'RightLeg', 'RightFoot', 'LeftUpLeg', 'LeftLeg', 'LeftFoot']
+  const live = Object.fromEntries(bones.map(bone => ['mixamorig' + bone, [0, 1, 0]]))
+  assert.equal(isControlPassSceneReady(people, {}), false)
+  assert.equal(isControlPassSceneReady(people, { 'person-1': live }), false)
+  assert.equal(isControlPassSceneReady(people, { 'person-1': live, 'person-2': live }), true)
+  assert.equal(isControlPassSceneReady([{ ...people[1], visible: false }, { id: 'box-1', type: 'box' }], {}), true)
+  assert.equal(isControlPassSceneReady([people[0]], { 'person-1': { ...live, mixamorigHead: [NaN, 0, 0] } }), false)
 })

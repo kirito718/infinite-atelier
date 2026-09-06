@@ -2041,7 +2041,8 @@ export default function App() {
         camera: captureCamera,
       })
       let ready = false
-      for (let attempt = 0; attempt < 90; attempt += 1) {
+      const captureDeadline = performance.now() + 25_000
+      while (performance.now() < captureDeadline) {
         await nextPaint()
         const { pose, depth } = controlCaptureCanvasRefs.current
         if (pose?.width === outputWidth && pose?.height === outputHeight && depth?.width === outputWidth && depth?.height === outputHeight) {

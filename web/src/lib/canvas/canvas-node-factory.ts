@@ -25,16 +25,13 @@ export function createCanvasNode(type: CanvasNodeTypeId, position: Position, met
 }
 
 /** createCanvasNode expects a center; Director placement is expressed as a top-left. */
-export function createDirectorImageNode(director: CanvasNodeData, metadata: CanvasNodeMetadata): CanvasNodeData {
+export function createDirectorImageNode(director: CanvasNodeData, metadata: CanvasNodeMetadata, existingNodes: CanvasNodeData[] = []): CanvasNodeData {
     const size = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
-    return createCanvasNode(
-        CanvasNodeType.Image,
-        {
-            x: director.position.x + director.width + 32 + size.width / 2,
-            y: director.position.y + size.height / 2,
-        },
-        metadata,
-    );
+    const x = director.position.x + director.width + 32;
+    const y = existingNodes
+        .filter((node) => node.type === CanvasNodeType.Image && node.metadata?.directorNodeId === director.id && node.position.x < x + size.width && node.position.x + node.width > x)
+        .reduce((bottom, node) => Math.max(bottom, node.position.y + node.height + 32), director.position.y);
+    return createCanvasNode(CanvasNodeType.Image, { x: x + size.width / 2, y: y + size.height / 2 }, metadata);
 }
 
 export function imageMetadata(image: UploadedImage): CanvasNodeMetadata {

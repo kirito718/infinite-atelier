@@ -44,7 +44,7 @@ npm run build:monoform
 COMFYUI_BASE_URL=http://127.0.0.1:8188 COMFYUI_API_PREFIX=/api npm run dev
 ```
 
-打开 `http://localhost:3000/canvas`，新建或打开画布 → 添加导演台 → 摆人物/选择动作 → 移动到目标帧 → 输入提示词 → **生成真人图**。结果使用当前活动镜头/帧，而不是固定第 0 帧。
+打开 `http://localhost:3000/canvas`，新建或打开画布 → 添加导演台 → 摆人物/选择动作 → 移动到目标帧 → 输入提示词 → **生成真人图**。结果使用当前活动镜头/帧，而不是固定第 0 帧。多次生成会向下排列结果，避免互相遮挡。错误图片的“重试”会回到原导演台重新确认并捕获控制图，不会误切换到其他图片服务商。
 
 直接 `npm run dev` / `npm start` 时，把变量导出到 Node 进程环境；**不要**把它们改成 `VITE_COMFYUI_*`。项目根目录 `.env` 是下面 Docker Compose 的输入，原生启动不会自动读取它。
 

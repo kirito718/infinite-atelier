@@ -132,3 +132,13 @@ describe("Director generation orchestration", () => {
         expect(uploadImage).not.toHaveBeenCalled();
     });
 });
+
+it("does not claim upstream cancellation if the create response was lost before its task id arrived", async () => {
+    const controller = new AbortController();
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+        controller.abort();
+        throw new TypeError("connection lost after POST");
+    });
+    await expect(generateDirectorImage(input, { signal: controller.signal })).rejects.toMatchObject({ code: "CANCEL_FAILED" });
+    expect(uploadImage).not.toHaveBeenCalled();
+});

@@ -4,7 +4,7 @@ import { ContactShadows, Grid, OrbitControls, TransformControls, useGLTF } from 
 import * as THREE from 'three'
 import { clone as skeletonClone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { OPENPOSE_JOINT_MAPPING, poseForObject, presetDefinition } from './rig.js'
-import { buildOpenPosePrimitives, captureProjectionSpec, isControlRenderMode, projectPoseKeypoints } from './control-passes.js'
+import { buildOpenPosePrimitives, captureProjectionSpec, isControlPassSceneReady, isControlRenderMode, projectPoseKeypoints } from './control-passes.js'
 
 const CAMERA_ID = '__shot_camera__'
 const BUILT_IN_MODEL_URL = `${import.meta.env.BASE_URL}models/xbot-animated.glb`
@@ -1409,13 +1409,13 @@ function LinearDepthMaterial({ near, far }) {
   return null
 }
 
-function DepthPreviewScene({ objects, cameraData, cameraAspect, animationTime }) {
+function DepthPreviewScene({ objects, cameraData, cameraAspect, animationTime, onLivePose }) {
   const projection = captureProjectionSpec(cameraData, cameraAspect)
   return (
     <>
       <color attach="background" args={['#000000']} />
       <LinearDepthMaterial near={projection.near} far={projection.far} />
-      {objects.map(object => <SceneObject key={object.id} data={object} animationTime={animationTime} preview />)}
+      {objects.map(object => <SceneObject key={object.id} data={object} animationTime={animationTime} preview onLivePose={onLivePose} />)}
       <PreviewCameraController cameraData={cameraData} cameraAspect={cameraAspect} controlProjection />
     </>
   )
@@ -1437,6 +1437,23 @@ export function MainViewport(props) {
       <EditorScene {...props} />
     </Canvas>
   )
+}
+
+function ControlPassCanvasReporter({ ready, onCanvasReady }) {
+  const readyFrames = useRef(0)
+  const reported = useRef(false)
+  useFrame(({ gl }) => {
+    if (!ready) { readyFrames.current = 0; return }
+    if (reported.current) return
+    // onCreated fires before suspended character rigs/animations are mounted.
+    // Only report after live rig state has reached and rendered in this root.
+    readyFrames.current += 1
+    if (readyFrames.current >= 3) {
+      reported.current = true
+      onCanvasReady?.(gl.domElement)
+    }
+  })
+  return null
 }
 
 export function CameraPreview({ objects, cameraData, cameraAspect, lighting, backgroundCanvas = null, animationTime = 0, onCanvasReady, exportMode = false, renderMode = 'beauty' }) {
@@ -1461,13 +1478,14 @@ export function CameraPreview({ objects, cameraData, cameraAspect, lighting, bac
         : { position: cameraData.position, fov: depthProjection?.verticalFovDegrees || 40, aspect: depthProjection?.aspect || cameraAspect, near: depthProjection?.near || cameraData.near || 0.05, far: depthProjection?.far || cameraData.far || 200 }}
       orthographic={mode === 'pose'}
       gl={{ alpha: mode !== 'pose', antialias: true, preserveDrawingBuffer: exportMode || Boolean(onCanvasReady), toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 0.9 }}
-      onCreated={({ gl }) => onCanvasReady?.(gl.domElement)}
+      onCreated={({ gl }) => { if (mode === 'beauty') onCanvasReady?.(gl.domElement) }}
     >
       {mode === 'pose'
         ? <PosePreviewScene objects={objects} cameraData={cameraData} width={poseWidth} height={poseHeight} animationTime={animationTime} liveJointPositions={liveJointPositions} onLivePose={reportLivePose} />
         : mode === 'depth'
-          ? <DepthPreviewScene objects={objects} cameraData={cameraData} cameraAspect={cameraAspect} animationTime={animationTime} />
+          ? <DepthPreviewScene objects={objects} cameraData={cameraData} cameraAspect={cameraAspect} animationTime={animationTime} onLivePose={reportLivePose} />
           : <PreviewScene objects={objects} cameraData={cameraData} cameraAspect={cameraAspect} lighting={lighting} backgroundCanvas={backgroundCanvas} animationTime={animationTime} />}
+      {mode !== 'beauty' && <ControlPassCanvasReporter ready={isControlPassSceneReady(objects, liveJointPositions)} onCanvasReady={onCanvasReady} />}
     </Canvas>
   )
 }

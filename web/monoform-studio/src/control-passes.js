@@ -42,6 +42,16 @@ export function isCaptureBusy({ lock = false, image = false, video = false, cont
   return Boolean(lock || image || video || control)
 }
 
+export function isControlPassSceneReady(objects, liveJointPositions) {
+  return objects.filter(object => object.type === 'person' && object.visible !== false).every(object => {
+    const positions = liveJointPositions[object.id]
+    return positions && OPENPOSE_JOINT_MAPPING.every(({ jointId }) => {
+      const point = positions[jointId]
+      return Array.isArray(point) && point.length === 3 && point.every(Number.isFinite)
+    })
+  })
+}
+
 export function isV1ControlPassList(passes) {
   return Array.isArray(passes)
     && passes.length === REQUIRED_CONTROL_PASSES.length
