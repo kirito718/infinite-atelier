@@ -29,7 +29,7 @@ export function createComfyUiClient({ baseUrl, apiPrefix = "", fetchImpl = globa
         try {
             response = await fetchImpl(buildHttpUrl(requestBaseUrl, prefix, path), {
                 ...init,
-                signal: createTimeoutSignal(timeoutMs),
+                signal: init.signal ?? createTimeoutSignal(timeoutMs),
             });
         } catch (error) {
             throw new ComfyUiClientError("COMFYUI_UNAVAILABLE", `ComfyUI request failed: ${error instanceof Error ? error.message : String(error)}`, error);
@@ -43,7 +43,7 @@ export function createComfyUiClient({ baseUrl, apiPrefix = "", fetchImpl = globa
     };
 
     return {
-        async uploadImage({ bytes, filename, mimeType, subfolder } = {}) {
+        async uploadImage({ bytes, filename, mimeType, subfolder, signal } = {}) {
             if (!(bytes instanceof Uint8Array) && !(bytes instanceof ArrayBuffer)) {
                 throw new ComfyUiClientError("COMFYUI_UPLOAD_INVALID", "Image bytes must be a Uint8Array or ArrayBuffer");
             }
@@ -60,7 +60,7 @@ export function createComfyUiClient({ baseUrl, apiPrefix = "", fetchImpl = globa
             form.append("type", "input");
             if (typeof subfolder === "string" && subfolder) form.append("subfolder", subfolder);
 
-            const response = await request("/upload/image", { method: "POST", body: form });
+            const response = await request("/upload/image", { method: "POST", body: form, signal });
             const uploaded = await parseJson(response, "COMFYUI_UPLOAD_FAILED");
             if (!isRecord(uploaded) || typeof uploaded.name !== "string" || !uploaded.name) {
                 throw new ComfyUiClientError("COMFYUI_UPLOAD_FAILED", "ComfyUI upload response is missing a name");

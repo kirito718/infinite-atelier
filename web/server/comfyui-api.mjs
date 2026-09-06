@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { Buffer } from "node:buffer";
 
 import { selectComfyUiOutput } from "./comfyui-client.mjs";
@@ -7,6 +7,8 @@ import { ComfyUiTaskStoreError } from "./comfyui-task-store.mjs";
 const DEFAULT_MAX_BYTES = 25 * 1024 * 1024;
 const DEFAULT_HISTORY_POLL_MS = 25;
 const DEFAULT_HISTORY_TIMEOUT_MS = 120_000;
+const MAX_SOURCE_IMAGE_DIMENSION = 8192;
+const MAX_SOURCE_IMAGE_PIXELS = MAX_SOURCE_IMAGE_DIMENSION * MAX_SOURCE_IMAGE_DIMENSION;
 const IMAGE_MIME_TYPES = new Set(["image/png", "image/webp"]);
 
 export function createComfyUiApi({ client, registry, store, maxBytes = DEFAULT_MAX_BYTES, parseMultipart = parseMultipartRequest } = {}) {
@@ -80,7 +82,7 @@ export function createComfyUiApi({ client, registry, store, maxBytes = DEFAULT_M
         const parsed = await parseMultipart(request, { maxBytes });
         const input = validateJobInput(parsed, registry, maxBytes);
         const requestKey = request.headers?.["idempotency-key"] || input.idempotencyKey;
-        const task = store.create({ requestKey, workflowId: input.workflowId });
+        const task = store.create({ requestKey, requestFingerprint: requestFingerprint(input), workflowId: input.workflowId });
 
         if (task.status === "queued" && !active.has(task.taskId)) {
             const controller = new AbortController();
@@ -150,8 +152,8 @@ export function createComfyUiApi({ client, registry, store, maxBytes = DEFAULT_M
             assertJobActive(taskId);
             store.update(taskId, { status: "uploading" });
             const [pose, depth] = await Promise.all([
-                client.uploadImage({ bytes: input.pose.bytes, filename: `pose-${taskId}.png`, mimeType: input.pose.mimeType, subfolder: "atelier" }),
-                client.uploadImage({ bytes: input.depth.bytes, filename: `depth-${taskId}.png`, mimeType: input.depth.mimeType, subfolder: "atelier" }),
+                client.uploadImage({ bytes: input.pose.bytes, filename: `pose-${taskId}.png`, mimeType: input.pose.mimeType, subfolder: "atelier", signal: controller.signal }),
+                client.uploadImage({ bytes: input.depth.bytes, filename: `depth-${taskId}.png`, mimeType: input.depth.mimeType, subfolder: "atelier", signal: controller.signal }),
             ]);
             assertJobActive(taskId);
 
@@ -340,6 +342,8 @@ function validateJobInput(parsed, registry, maxBytes) {
     const pose = validateImagePart(files.pose, "pose");
     const depth = validateImagePart(files.depth, "depth");
     const reference = files.reference ? validateImagePart(files.reference, "reference") : undefined;
+    if (pose.width !== width || pose.height !== height) throw new HttpError(400, "INPUT_DIMENSIONS_MISMATCH", `pose image dimensions ${pose.width}x${pose.height} must match requested ${width}x${height}`, false);
+    if (depth.width !== width || depth.height !== height) throw new HttpError(400, "INPUT_DIMENSIONS_MISMATCH", `depth image dimensions ${depth.width}x${depth.height} must match requested ${width}x${height}`, false);
     const imageBytes = pose.bytes.length + depth.bytes.length + (reference?.bytes.length ?? 0);
     if (imageBytes > maxBytes) throw new HttpError(413, "REQUEST_TOO_LARGE", "Multipart request exceeds the byte limit", false);
     return {
@@ -383,8 +387,11 @@ function validateImagePart(value, name) {
     if (!IMAGE_MIME_TYPES.has(mimeType)) throw new HttpError(400, "INPUT_INVALID", `${name} image must be image/png or image/webp`, false);
     const bytes = toBuffer(value.bytes ?? value.data);
     if (bytes.length === 0) throw new HttpError(400, "INPUT_INVALID", `${name} image must not be empty`, false);
-    const dimensions = imageDimensions(bytes, mimeType) || { width: value.width, height: value.height };
-    if (!Number.isInteger(dimensions.width) || dimensions.width < 1 || !Number.isInteger(dimensions.height) || dimensions.height < 1) throw new HttpError(400, "INPUT_INVALID", `${name} image dimensions are required`, false);
+    const dimensions = imageDimensions(bytes, mimeType);
+    if (!dimensions || !Number.isInteger(dimensions.width) || dimensions.width < 1 || !Number.isInteger(dimensions.height) || dimensions.height < 1) throw new HttpError(400, "INPUT_INVALID", `${name} image has an invalid or unsupported header`, false);
+    if ((value.width !== undefined && value.width !== dimensions.width) || (value.height !== undefined && value.height !== dimensions.height)) throw new HttpError(400, "INPUT_INVALID", `${name} image dimensions do not match its header`, false);
+    if (dimensions.width > MAX_SOURCE_IMAGE_DIMENSION || dimensions.height > MAX_SOURCE_IMAGE_DIMENSION || dimensions.width * dimensions.height > MAX_SOURCE_IMAGE_PIXELS)
+        throw new HttpError(400, "INPUT_INVALID", `${name} image dimensions exceed the ${MAX_SOURCE_IMAGE_DIMENSION}px source limit`, false);
     return { filename: safeFilename(value.filename ?? value.name, `${name}.png`), mimeType, bytes, width: dimensions.width, height: dimensions.height };
 }
 
@@ -457,6 +464,33 @@ function workflowImageReference(value) {
     return subfolder ? `${subfolder}/${name}` : name;
 }
 
+function requestFingerprint(input) {
+    const hash = createHash("sha256");
+    hash.update(
+        JSON.stringify({
+            workflowId: input.workflowId,
+            prompt: input.prompt,
+            negativePrompt: input.negativePrompt ?? null,
+            seed: input.seed ?? null,
+            shotId: input.shotId,
+            frame: input.frame,
+            width: input.width,
+            height: input.height,
+        }),
+    );
+    for (const image of [input.pose, input.depth, input.reference]) {
+        if (!image) {
+            hash.update("<none>");
+            continue;
+        }
+        hash.update(image.mimeType);
+        hash.update(String(image.width));
+        hash.update(String(image.height));
+        hash.update(toBuffer(image.bytes));
+    }
+    return hash.digest("hex");
+}
+
 function isTerminal(status) {
     return status === "succeeded" || status === "failed" || status === "cancelled";
 }
@@ -478,7 +512,10 @@ function mapFailureCode(code) {
 
 function normalizeError(error) {
     if (error instanceof HttpError) return error;
-    if (error instanceof ComfyUiTaskStoreError) return new HttpError(error.code === "TASK_NOT_FOUND" ? 404 : 409, error.code, error.message, false);
+    if (error instanceof ComfyUiTaskStoreError) {
+        const status = error.code === "TASK_NOT_FOUND" ? 404 : ["TASK_KEY_INVALID", "TASK_FINGERPRINT_INVALID"].includes(error.code) ? 400 : 409;
+        return new HttpError(status, error.code, error.message, false);
+    }
     return new HttpError(500, "COMFYUI_API_ERROR", safeMessage(error, "ComfyUI API request failed"), false);
 }
 

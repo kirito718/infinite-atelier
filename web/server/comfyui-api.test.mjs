@@ -51,6 +51,28 @@ test("task store cancellation is idempotent and blocks late updates", () => {
     store.close();
 });
 
+test("task store can fail from upload and submission stages", () => {
+    const store = createComfyUiTaskStore({ ttlMs: 1000, clock: () => 0 });
+    const uploading = store.create({ workflowId: "portrait-pose-depth" });
+    store.update(uploading.taskId, { status: "uploading" });
+    assert.equal(store.update(uploading.taskId, { status: "failed", error: { code: "UPLOAD_FAILED", message: "failed", retryable: true } }).status, "failed");
+
+    const submitted = store.create({ workflowId: "portrait-pose-depth" });
+    store.update(submitted.taskId, { status: "uploading" });
+    store.update(submitted.taskId, { status: "submitted", promptId: "prompt-2" });
+    assert.equal(store.update(submitted.taskId, { status: "failed", error: { code: "QUEUE_FAILED", message: "failed", retryable: true } }).status, "failed");
+    store.close();
+});
+
+test("task store validates output before committing succeeded", () => {
+    const store = createComfyUiTaskStore({ ttlMs: 1000, clock: () => 0 });
+    const task = store.create({ workflowId: "portrait-pose-depth" });
+    store.update(task.taskId, { status: "uploading" });
+    assert.throws(() => store.update(task.taskId, { status: "succeeded", output: { bytes: "not-bytes", mimeType: "image/png" } }), /output|binary|bytes/i);
+    assert.equal(store.get(task.taskId).status, "uploading");
+    store.close();
+});
+
 test("HTTP API creates a job, reports progress, and serves only its own output", async () => {
     const fake = createFakeClient();
     const api = createTestApi(fake);
@@ -94,6 +116,149 @@ test("HTTP API rejects invalid input before contacting ComfyUI", async () => {
         assert.equal(response.status, 400);
         assert.equal((await response.json()).error.code, "WORKFLOW_INVALID");
         assert.equal(fake.calls.length, 0);
+    } finally {
+        await server.close();
+    }
+});
+
+test("HTTP API rejects oversized or mismatched control dimensions before upload", async () => {
+    const fake = createFakeClient();
+    const api = createTestApi(fake, {
+        parseMultipart: async () => ({
+            fields: { workflowId: "portrait-pose-depth", prompt: "portrait", shotId: "shot-1", frame: "0", width: "2", height: "2" },
+            files: { pose: imagePart({ width: 8193, height: 1 }), depth: imagePart({ width: 2, height: 2 }) },
+        }),
+    });
+    const server = await listen(api);
+    try {
+        const response = await server.request("/api/comfyui/jobs", { method: "POST" });
+        assert.equal(response.status, 400);
+        assert.equal((await response.json()).error.code, "INPUT_INVALID");
+        assert.equal(fake.calls.filter((call) => call.method === "uploadImage").length, 0);
+    } finally {
+        await server.close();
+    }
+});
+
+test("HTTP API rejects source dimensions that differ from the requested output", async () => {
+    const fake = createFakeClient();
+    const api = createTestApi(fake, {
+        parseMultipart: async () => ({
+            fields: { workflowId: "portrait-pose-depth", prompt: "portrait", shotId: "shot-1", frame: "0", width: "2", height: "2" },
+            files: { pose: imagePart({ width: 1, height: 1 }), depth: imagePart({ width: 2, height: 2 }) },
+        }),
+    });
+    const server = await listen(api);
+    try {
+        const response = await server.request("/api/comfyui/jobs", { method: "POST" });
+        assert.equal(response.status, 400);
+        assert.equal((await response.json()).error.code, "INPUT_DIMENSIONS_MISMATCH");
+        assert.equal(fake.calls.filter((call) => call.method === "uploadImage").length, 0);
+    } finally {
+        await server.close();
+    }
+});
+
+test("HTTP API marks upload failures terminal instead of leaving a task uploading", async () => {
+    const fake = createFakeClient({
+        uploadImage: async () => {
+            throw Object.assign(new Error("upload failed"), { code: "COMFYUI_UPLOAD_FAILED" });
+        },
+    });
+    const api = createTestApi(fake);
+    const server = await listen(api);
+    try {
+        const created = await server.request("/api/comfyui/jobs", { method: "POST", headers: { "idempotency-key": "upload-failure" } });
+        const body = await created.json();
+        const failed = await waitForStatus(server.request, body.taskId, "failed");
+        assert.equal(failed.error.code, "UPLOAD_FAILED");
+    } finally {
+        await server.close();
+    }
+});
+
+test("HTTP API marks queue failures terminal after uploads", async () => {
+    const fake = createFakeClient({
+        queuePrompt: async () => {
+            throw Object.assign(new Error("queue failed"), { code: "COMFYUI_QUEUE_FAILED" });
+        },
+    });
+    const api = createTestApi(fake);
+    const server = await listen(api);
+    try {
+        const created = await server.request("/api/comfyui/jobs", { method: "POST", headers: { "idempotency-key": "queue-failure" } });
+        const body = await created.json();
+        const failed = await waitForStatus(server.request, body.taskId, "failed");
+        assert.equal(failed.error.code, "QUEUE_FAILED");
+    } finally {
+        await server.close();
+    }
+});
+
+test("HTTP API rejects an overlong idempotency key", async () => {
+    const fake = createFakeClient();
+    const api = createTestApi(fake);
+    const server = await listen(api);
+    try {
+        const response = await server.request("/api/comfyui/jobs", { method: "POST", headers: { "idempotency-key": "k".repeat(257) } });
+        assert.equal(response.status, 400);
+        assert.equal((await response.json()).error.code, "TASK_KEY_INVALID");
+    } finally {
+        await server.close();
+    }
+});
+
+test("HTTP API rejects a changed payload under the same idempotency key", async () => {
+    const fake = createFakeClient();
+    let prompt = "portrait";
+    const api = createTestApi(fake, {
+        parseMultipart: async () => ({
+            fields: { workflowId: "portrait-pose-depth", prompt, shotId: "shot-1", frame: "0", width: "1", height: "1" },
+            files: { pose: imagePart(), depth: imagePart() },
+        }),
+    });
+    const server = await listen(api);
+    try {
+        const first = await server.request("/api/comfyui/jobs", { method: "POST", headers: { "idempotency-key": "fingerprint-key" } });
+        assert.equal(first.status, 202);
+        prompt = "different prompt";
+        const conflict = await server.request("/api/comfyui/jobs", { method: "POST", headers: { "idempotency-key": "fingerprint-key" } });
+        assert.equal(conflict.status, 409);
+        assert.equal((await conflict.json()).error.code, "TASK_IDEMPOTENCY_CONFLICT");
+    } finally {
+        await server.close();
+    }
+});
+
+test("DELETE aborts in-flight control uploads and prevents queue submission", async () => {
+    let uploadStarted;
+    const started = new Promise((resolve) => {
+        uploadStarted = resolve;
+    });
+    const fake = createFakeClient({
+        uploadImage: async ({ signal }) => {
+            uploadStarted();
+            await new Promise((resolve, reject) => {
+                if (signal?.aborted) return reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+                signal?.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" })), { once: true });
+            });
+        },
+    });
+    const api = createTestApi(fake);
+    const server = await listen(api);
+    try {
+        const created = await server.request("/api/comfyui/jobs", { method: "POST", headers: { "idempotency-key": "upload-cancel" } });
+        const body = await created.json();
+        await uploadStarted;
+        const cancelled = await server.request(`/api/comfyui/jobs/${body.taskId}`, { method: "DELETE" });
+        assert.equal(cancelled.status, 200);
+        assert.equal((await cancelled.json()).status, "cancelled");
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        assert.equal(fake.calls.filter((call) => call.method === "queuePrompt").length, 0);
+        assert.equal(
+            fake.calls.filter((call) => call.method === "uploadImage").every((call) => call.input.signal.aborted),
+            true,
+        );
     } finally {
         await server.close();
     }
@@ -149,16 +314,18 @@ function createTestApi(client, options = {}) {
     return createComfyUiApi({ client, registry, store, parseMultipart, maxBytes: 10 * 1024 * 1024 });
 }
 
-function createFakeClient({ waiting = Promise.resolve() } = {}) {
+function createFakeClient({ waiting = Promise.resolve(), uploadImage, queuePrompt } = {}) {
     const calls = [];
     return {
         calls,
         async uploadImage(input) {
             calls.push({ method: "uploadImage", input });
+            if (uploadImage) return uploadImage(input);
             return { name: input.filename, subfolder: "", type: "input" };
         },
         async queuePrompt(input) {
             calls.push({ method: "queuePrompt", input });
+            if (queuePrompt) return queuePrompt(input);
             return { prompt_id: "prompt-1" };
         },
         async waitForCompletion({ onProgress }) {
@@ -181,8 +348,11 @@ function createFakeClient({ waiting = Promise.resolve() } = {}) {
     };
 }
 
-function imagePart() {
-    return { filename: "control.png", mimeType: "image/png", bytes: PNG, width: 1, height: 1 };
+function imagePart({ width = 1, height = 1 } = {}) {
+    const bytes = Buffer.from(PNG);
+    bytes.writeUInt32BE(width, 16);
+    bytes.writeUInt32BE(height, 20);
+    return { filename: "control.png", mimeType: "image/png", bytes, width, height };
 }
 
 async function listen(api) {

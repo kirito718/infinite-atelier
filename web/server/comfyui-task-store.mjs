@@ -4,8 +4,8 @@ const STATES = new Set(["queued", "uploading", "submitted", "running", "succeede
 const TERMINAL_STATES = new Set(["succeeded", "failed", "cancelled"]);
 const TRANSITIONS = {
     queued: new Set(["uploading", "cancelled"]),
-    uploading: new Set(["submitted", "cancelled"]),
-    submitted: new Set(["running", "cancelled"]),
+    uploading: new Set(["submitted", "failed", "cancelled"]),
+    submitted: new Set(["running", "failed", "cancelled"]),
     running: new Set(["succeeded", "failed", "cancelled"]),
     succeeded: new Set(),
     failed: new Set(),
@@ -47,10 +47,16 @@ export function createComfyUiTaskStore({ ttlMs = 10 * 60 * 1000, clock = Date.no
             assertOpen();
             sweep();
             const requestKey = normalizeRequestKey(input.requestKey ?? input.idempotencyKey ?? input.requestId ?? input.key);
+            const requestFingerprint = normalizeRequestFingerprint(input.requestFingerprint);
             if (requestKey) {
                 const existingId = requestKeys.get(requestKey);
                 const existing = existingId ? tasks.get(existingId) : undefined;
-                if (existing) return snapshot(existing);
+                if (existing) {
+                    if ((existing.requestFingerprint || requestFingerprint) && existing.requestFingerprint !== requestFingerprint) {
+                        throw new ComfyUiTaskStoreError("TASK_IDEMPOTENCY_CONFLICT", `Idempotency key is already bound to a different request: ${requestKey}`);
+                    }
+                    return snapshot(existing);
+                }
                 requestKeys.delete(requestKey);
             }
 
@@ -59,6 +65,7 @@ export function createComfyUiTaskStore({ ttlMs = 10 * 60 * 1000, clock = Date.no
             const task = {
                 taskId,
                 requestKey,
+                requestFingerprint,
                 workflowId: typeof input.workflowId === "string" ? input.workflowId : undefined,
                 status: "queued",
                 promptId: undefined,
@@ -86,6 +93,10 @@ export function createComfyUiTaskStore({ ttlMs = 10 * 60 * 1000, clock = Date.no
             sweep();
             const task = requireTask(taskId);
             if (typeof patch === "string") patch = { status: patch };
+            const nextStatus = patch.status ?? task.status;
+            const nextOutput = patch.output !== undefined ? normalizeOutput(patch.output) : task.output;
+            const nextProgress = patch.progress !== undefined ? cloneValue(patch.progress) : task.progress;
+            const nextError = patch.error !== undefined ? cloneValue(patch.error) : task.error;
             if (task.status === "cancelled") {
                 throw new ComfyUiTaskStoreError("TASK_CANCELLED", `Task ${taskId} is cancelled and cannot be updated`);
             }
@@ -93,20 +104,21 @@ export function createComfyUiTaskStore({ ttlMs = 10 * 60 * 1000, clock = Date.no
                 throw new ComfyUiTaskStoreError("TASK_TERMINAL", `Task ${taskId} is already ${task.status} and cannot be updated`);
             }
             if (patch.status !== undefined) {
-                if (!STATES.has(patch.status) || !TRANSITIONS[task.status].has(patch.status)) {
-                    throw new ComfyUiTaskStoreError("TASK_TRANSITION_INVALID", `Invalid task transition: ${task.status} -> ${patch.status}`);
-                }
-                task.status = patch.status;
-                if (patch.status === "cancelled") {
-                    task.output = undefined;
-                    task.error = { code: "CANCELLED", message: "ComfyUI generation was cancelled", retryable: false };
+                if (!STATES.has(nextStatus) || !TRANSITIONS[task.status].has(nextStatus)) {
+                    throw new ComfyUiTaskStoreError("TASK_TRANSITION_INVALID", `Invalid task transition: ${task.status} -> ${nextStatus}`);
                 }
             }
+            if (nextStatus === "succeeded" && !nextOutput) throw new ComfyUiTaskStoreError("TASK_OUTPUT_INVALID", "A succeeded task must retain output bytes");
+            task.status = nextStatus;
             if (patch.workflowId !== undefined) task.workflowId = patch.workflowId;
             if (patch.promptId !== undefined) task.promptId = patch.promptId;
-            if (patch.progress !== undefined) task.progress = cloneValue(patch.progress);
-            if (patch.error !== undefined) task.error = cloneValue(patch.error);
-            if (patch.output !== undefined) task.output = normalizeOutput(patch.output);
+            task.progress = nextProgress;
+            task.error = nextError;
+            task.output = nextOutput;
+            if (nextStatus === "cancelled") {
+                task.output = undefined;
+                task.error = { code: "CANCELLED", message: "ComfyUI generation was cancelled", retryable: false };
+            }
             if (TERMINAL_STATES.has(task.status)) armExpiry(task);
             return snapshot(task);
         },
@@ -169,6 +181,7 @@ function snapshot(task) {
     };
     Object.defineProperty(value, "id", { value: task.taskId, enumerable: false });
     Object.defineProperty(value, "requestKey", { value: task.requestKey, enumerable: false });
+    Object.defineProperty(value, "requestFingerprint", { value: task.requestFingerprint, enumerable: false });
     Object.defineProperty(value, "context", { value: task.context, enumerable: false });
     return value;
 }
@@ -207,5 +220,15 @@ function normalizeClock(clock) {
 }
 
 function normalizeRequestKey(value) {
-    return typeof value === "string" && value.trim() ? value.trim() : undefined;
+    if (value === undefined || value === null || value === "") return undefined;
+    if (typeof value !== "string" || !value.trim()) throw new ComfyUiTaskStoreError("TASK_KEY_INVALID", "Idempotency key must be a non-empty string");
+    const key = value.trim();
+    if (key.length > 256) throw new ComfyUiTaskStoreError("TASK_KEY_INVALID", "Idempotency key is too long");
+    return key;
+}
+
+function normalizeRequestFingerprint(value) {
+    if (value === undefined || value === null || value === "") return undefined;
+    if (typeof value !== "string" || value.length > 256) throw new ComfyUiTaskStoreError("TASK_FINGERPRINT_INVALID", "Request fingerprint is invalid");
+    return value;
 }
