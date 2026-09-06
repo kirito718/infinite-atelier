@@ -26,13 +26,16 @@ export function createComfyUiClient({ baseUrl, apiPrefix = "", fetchImpl = globa
 
     const request = async (path, init = {}) => {
         let response;
+        const composed = composeRequestSignal(init.signal, timeoutMs);
         try {
             response = await fetchImpl(buildHttpUrl(requestBaseUrl, prefix, path), {
                 ...init,
-                signal: init.signal ?? createTimeoutSignal(timeoutMs),
+                signal: composed.signal,
             });
         } catch (error) {
             throw new ComfyUiClientError("COMFYUI_UNAVAILABLE", `ComfyUI request failed: ${error instanceof Error ? error.message : String(error)}`, error);
+        } finally {
+            composed.cleanup();
         }
         if (!response?.ok) {
             const error = new ComfyUiClientError("COMFYUI_HTTP_ERROR", `ComfyUI request failed with status ${response?.status ?? "unknown"}: ${await responseErrorMessage(response)}`);
@@ -295,8 +298,54 @@ function buildWebSocketUrl(baseUrl, apiPrefix, clientId) {
     return url.toString();
 }
 
-function createTimeoutSignal(timeoutMs) {
-    return Number.isFinite(timeoutMs) && timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : undefined;
+function composeRequestSignal(callerSignal, timeoutMs) {
+    const hasTimeout = Number.isFinite(timeoutMs) && timeoutMs > 0;
+    if (!callerSignal && !hasTimeout) return { signal: undefined, cleanup() {} };
+    if (!hasTimeout) return { signal: callerSignal, cleanup() {} };
+
+    const timeoutController = new AbortController();
+    const timeout = setTimeout(() => timeoutController.abort(timeoutError()), timeoutMs);
+    timeout.unref?.();
+
+    if (!callerSignal) {
+        return {
+            signal: timeoutController.signal,
+            cleanup() {
+                clearTimeout(timeout);
+            },
+        };
+    }
+
+    if (typeof AbortSignal !== "undefined" && typeof AbortSignal.any === "function") {
+        return {
+            signal: AbortSignal.any([callerSignal, timeoutController.signal]),
+            cleanup() {
+                clearTimeout(timeout);
+            },
+        };
+    }
+
+    const controller = new AbortController();
+    const abortFromCaller = () => controller.abort(callerSignal.reason);
+    if (callerSignal.aborted) abortFromCaller();
+    else callerSignal.addEventListener("abort", abortFromCaller, { once: true });
+    const abortFromTimeout = () => controller.abort(timeoutController.signal.reason);
+    timeoutController.signal.addEventListener("abort", abortFromTimeout, { once: true });
+    return {
+        signal: controller.signal,
+        cleanup() {
+            clearTimeout(timeout);
+            callerSignal.removeEventListener("abort", abortFromCaller);
+            timeoutController.signal.removeEventListener("abort", abortFromTimeout);
+        },
+    };
+}
+
+function timeoutError() {
+    if (typeof DOMException === "function") return new DOMException("The operation was aborted due to timeout", "TimeoutError");
+    const error = new Error("The operation was aborted due to timeout");
+    error.name = "TimeoutError";
+    return error;
 }
 
 async function parseJson(response, code) {

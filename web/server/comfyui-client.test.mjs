@@ -33,6 +33,50 @@ test("uploads a control image as ComfyUI input multipart data", async () => {
     assert.deepEqual(new Uint8Array(await uploaded.arrayBuffer()), new Uint8Array([1, 2, 3]));
 });
 
+test("combines caller abort with the request timeout for uploads", async () => {
+    const caller = new AbortController();
+    let capturedSignal;
+    const client = createComfyUiClient({
+        baseUrl: "http://comfyui.internal:8188",
+        timeoutMs: 10,
+        fetchImpl: (_url, init) =>
+            new Promise((resolve, reject) => {
+                capturedSignal = init.signal;
+                if (capturedSignal.aborted) reject(capturedSignal.reason);
+                else capturedSignal.addEventListener("abort", () => reject(capturedSignal.reason), { once: true });
+            }),
+        websocketFactory: unavailableWebSocket,
+    });
+
+    const pending = client.uploadImage({ bytes: new Uint8Array([1]), filename: "pose.png", mimeType: "image/png", signal: caller.signal }).catch((error) => error);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const timedOut = capturedSignal?.aborted === true;
+    if (!timedOut) caller.abort();
+    assert.equal(timedOut, true);
+    assert.equal((await pending).code, "COMFYUI_UNAVAILABLE");
+});
+
+test("caller abort still cancels a request before its timeout", async () => {
+    const controller = new AbortController();
+    let capturedSignal;
+    const client = createComfyUiClient({
+        baseUrl: "http://comfyui.internal:8188",
+        timeoutMs: 1_000,
+        fetchImpl: (_url, init) =>
+            new Promise((resolve, reject) => {
+                capturedSignal = init.signal;
+                if (capturedSignal.aborted) reject(capturedSignal.reason);
+                else capturedSignal.addEventListener("abort", () => reject(capturedSignal.reason), { once: true });
+            }),
+        websocketFactory: unavailableWebSocket,
+    });
+
+    const pending = client.uploadImage({ bytes: new Uint8Array([1]), filename: "pose.png", mimeType: "image/png", signal: controller.signal });
+    controller.abort();
+    await assert.rejects(pending, (error) => error.code === "COMFYUI_UNAVAILABLE");
+    assert.equal(capturedSignal?.aborted, true);
+});
+
 test("queues a prompt with request-scoped client and prompt identifiers", async () => {
     const calls = [];
     const client = createComfyUiClient({
