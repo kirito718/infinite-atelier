@@ -195,6 +195,20 @@ GitHub Actions 只负责测试、构建和发布镜像：CI 不执行真实的 C
 
 Docker 运行方式仍受同样的安全边界约束：若需要从其他设备访问，请让 Docker 继续监听回环地址，并在 VPN 或带认证的 HTTPS 反向代理后提供访问；不要把未保护的 HTTP 端口直接发布到公网。
 
+## 导演台 + MONOFORM + ComfyUI
+
+导演台新增 **生成真人图**：摆人物/选择动作 → 捕获当前镜头与当前帧的 Pose、Depth → 服务端提交 ComfyUI 工作流 → 将结果保存到无限画布。支持提示词、进度、取消与重试；浏览器只访问同源网关。
+
+```sh
+# 先启动已配置模型的 ComfyUI，再启动本项目
+cd web
+COMFYUI_BASE_URL=http://127.0.0.1:8188 COMFYUI_API_PREFIX=/api npm run dev
+```
+
+容器化入口为根目录 `Dockerfile`、`compose.yaml` 和 `.env.example`；已有 Docker 构建流水线已纳入本分支。Linux NVIDIA 可启用 `gpu` profile；Mac 或已有远端 GPU 只启动 Atelier 并覆盖上游私网地址。
+
+完整模型清单、Docker/GPU 前置条件、远端拓扑、持久化与排障见 [ComfyUI 部署文档](docs/comfyui.md)。当前提供的是单用户内存任务队列，真实生成需要自行配置 ComfyUI 与模型；不包含 GPU 资源或模型授权。
+
 ## 目录
 
 ```text

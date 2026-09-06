@@ -18,3 +18,8 @@ web/.playwright-cli
 .browser
 .cache
 .DS_Store
+
+.superpowers
+# Rebuilt from source inside the image; never ship local stale hashed bundles.
+web/public/monoform/assets
+web/public/monoform/index.html
