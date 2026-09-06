@@ -2,22 +2,34 @@ import { OPENPOSE_JOINT_MAPPING, poseForObject } from './rig.js'
 
 export const OPENPOSE_KEYPOINTS = Object.freeze(OPENPOSE_JOINT_MAPPING.map(({ name }) => ({ name })))
 
+// COCO/OpenPose body limb order; colors identify anatomy across every person.
 export const poseConnections = Object.freeze([
-  ['nose', 'neck'],
-  ['neck', 'rightShoulder'],
-  ['rightShoulder', 'rightElbow'],
-  ['rightElbow', 'rightWrist'],
-  ['neck', 'leftShoulder'],
-  ['leftShoulder', 'leftElbow'],
-  ['leftElbow', 'leftWrist'],
-  ['neck', 'rightHip'],
-  ['rightHip', 'rightKnee'],
-  ['rightKnee', 'rightAnkle'],
-  ['neck', 'leftHip'],
-  ['leftHip', 'leftKnee'],
-  ['leftKnee', 'leftAnkle'],
-  ['rightHip', 'leftHip'],
+  ['neck', 'rightShoulder'], ['neck', 'leftShoulder'],
+  ['rightShoulder', 'rightElbow'], ['rightElbow', 'rightWrist'],
+  ['leftShoulder', 'leftElbow'], ['leftElbow', 'leftWrist'],
+  ['neck', 'rightHip'], ['rightHip', 'rightKnee'], ['rightKnee', 'rightAnkle'],
+  ['neck', 'leftHip'], ['leftHip', 'leftKnee'], ['leftKnee', 'leftAnkle'],
+  ['neck', 'nose'],
+].map(connection => Object.freeze(connection)))
+
+const OPENPOSE_COLORS = Object.freeze([
+  '#ff0000', '#ff5500', '#ffaa00', '#ffff00', '#aaff00', '#55ff00',
+  '#00ff00', '#00ff55', '#00ffaa', '#00ffff', '#00aaff', '#0055ff',
+  '#0000ff', '#5500ff', '#aa00ff', '#ff00ff', '#ff00aa', '#ff0055',
 ])
+
+export function buildOpenPosePrimitives(points) {
+  const byName = new Map(points.map(point => [point.name, point]))
+  const limbs = poseConnections.flatMap(([from, to], index) => {
+    const start = byName.get(from), end = byName.get(to)
+    return start?.visible && end?.visible ? [{ from: start, to: end, color: OPENPOSE_COLORS[index] }] : []
+  })
+  const joints = OPENPOSE_KEYPOINTS.flatMap(({ name }, index) => {
+    const point = byName.get(name)
+    return point?.visible ? [{ point, color: OPENPOSE_COLORS[index] }] : []
+  })
+  return { limbs, joints }
+}
 
 const CONTROL_RENDER_MODES = new Set(['beauty', 'pose', 'depth'])
 const REQUIRED_CONTROL_PASSES = Object.freeze(['pose', 'depth'])
@@ -34,6 +46,18 @@ export function isV1ControlPassList(passes) {
   return Array.isArray(passes)
     && passes.length === REQUIRED_CONTROL_PASSES.length
     && REQUIRED_CONTROL_PASSES.every(kind => passes.includes(kind))
+}
+
+export function resolveControlCaptureSelection(selection, { activeShotId, currentFrame, totalFrames }) {
+  const shotId = selection.shotId ?? activeShotId
+  const frame = selection.frame ?? currentFrame
+  // Only the active scene is mounted. Never label its pixels as another shot.
+  if (!shotId || shotId !== activeShotId || !Number.isInteger(frame) || frame < 0 || frame > totalFrames) {
+    const error = new Error('请捕获当前镜头中的有效帧')
+    error.code = 'INVALID_REQUEST'
+    throw error
+  }
+  return { shotId, frame }
 }
 
 export function controlPassCamera(camera, { width, height }) {

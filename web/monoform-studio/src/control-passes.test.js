@@ -3,6 +3,7 @@ import test from 'node:test'
 
 import {
   OPENPOSE_KEYPOINTS,
+  buildOpenPosePrimitives,
   clampDepth,
   controlPassCamera,
   captureProjectionSpec,
@@ -11,6 +12,7 @@ import {
   isV1ControlPassList,
   poseConnections,
   projectPoseKeypoints,
+  resolveControlCaptureSelection,
   validateControlCaptureResult,
 } from './control-passes.js'
 
@@ -123,4 +125,35 @@ test('shares a busy guard across image, video, and control capture operations', 
   assert.equal(isCaptureBusy({ image: true }), true)
   assert.equal(isCaptureBusy({ video: true }), true)
   assert.equal(isCaptureBusy({ control: true }), true)
+})
+
+// Regression: capture must use the displayed shot/frame, not the Director node ID or frame zero.
+test('resolves an omitted capture selection to the active shot and current frame', () => {
+  assert.deepEqual(resolveControlCaptureSelection({}, { activeShotId: 'shot-02', currentFrame: 48, totalFrames: 360 }), { shotId: 'shot-02', frame: 48 })
+})
+
+test('accepts an explicit current-shot frame but rejects mislabeled shots and invalid frames', () => {
+  const context = { activeShotId: 'shot-02', currentFrame: 48, totalFrames: 360 }
+  assert.deepEqual(resolveControlCaptureSelection({ shotId: 'shot-02', frame: 12 }, context), { shotId: 'shot-02', frame: 12 })
+  for (const selection of [{ shotId: 'director-node' }, { frame: -1 }, { frame: 361 }, { frame: 1.5 }]) {
+    assert.throws(() => resolveControlCaptureSelection(selection, context), { code: 'INVALID_REQUEST' })
+  }
+})
+
+// OpenPose colors encode anatomy, not a per-person visual style.
+test('encodes limb and joint identity using the standard OpenPose body palette', () => {
+  const points = [
+    { name: 'nose', x: 50, y: 10, visible: true },
+    { name: 'neck', x: 50, y: 30, visible: true },
+    { name: 'rightShoulder', x: 30, y: 30, visible: true },
+    { name: 'leftShoulder', x: 70, y: 30, visible: true },
+    { name: 'rightElbow', x: 20, y: 50, visible: false },
+  ]
+  const drawing = buildOpenPosePrimitives(points)
+  assert.deepEqual(drawing.limbs.map(({ from, to, color }) => [from.name, to.name, color]), [
+    ['neck', 'rightShoulder', '#ff0000'], ['neck', 'leftShoulder', '#ff5500'], ['neck', 'nose', '#0000ff'],
+  ])
+  assert.deepEqual(drawing.joints.map(({ point, color }) => [point.name, color]), [
+    ['nose', '#ff0000'], ['neck', '#ff5500'], ['rightShoulder', '#ffaa00'], ['leftShoulder', '#55ff00'],
+  ])
 })

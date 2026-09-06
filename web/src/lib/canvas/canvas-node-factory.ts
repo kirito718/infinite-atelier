@@ -24,6 +24,19 @@ export function createCanvasNode(type: CanvasNodeTypeId, position: Position, met
     };
 }
 
+/** createCanvasNode expects a center; Director placement is expressed as a top-left. */
+export function createDirectorImageNode(director: CanvasNodeData, metadata: CanvasNodeMetadata): CanvasNodeData {
+    const size = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
+    return createCanvasNode(
+        CanvasNodeType.Image,
+        {
+            x: director.position.x + director.width + 32 + size.width / 2,
+            y: director.position.y + size.height / 2,
+        },
+        metadata,
+    );
+}
+
 export function imageMetadata(image: UploadedImage): CanvasNodeMetadata {
     return { content: image.url, storageKey: image.storageKey, status: "success", naturalWidth: image.width, naturalHeight: image.height, bytes: image.bytes, mimeType: image.mimeType };
 }

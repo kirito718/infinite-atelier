@@ -39,6 +39,7 @@ export type CanvasNodeImage = {
 };
 
 export type CanvasNodeMetadata = {
+    source?: "monoform" | "canvas" | string;
     content?: string;
     composerContent?: string;
     prompt?: string;
@@ -72,6 +73,14 @@ export type CanvasNodeMetadata = {
     mimeType?: string;
     bytes?: number;
     durationMs?: number;
+    generationProvider?: string;
+    generationTaskId?: string;
+    comfyPromptId?: string;
+    workflowId?: string;
+    directorNodeId?: string;
+    directorShotId?: string;
+    directorFrame?: number;
+    dimensions?: { width: number; height: number };
     groupId?: string;
     interactive?: boolean; // Plugin node interaction/move state; see CanvasNodeDefinition.interactionToggle.
 };

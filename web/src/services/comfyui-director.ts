@@ -17,7 +17,7 @@ export class ComfyUiApiError extends Error {
     }
 }
 
-export async function createComfyUiJob(input: ComfyUiJobCreate): Promise<ComfyUiJobStatus> {
+export async function createComfyUiJob(input: ComfyUiJobCreate, options: ComfyUiRequestOptions = {}): Promise<ComfyUiJobStatus> {
     const form = new FormData();
     form.append("workflowId", input.workflowId);
     form.append("prompt", input.prompt);
@@ -34,20 +34,35 @@ export async function createComfyUiJob(input: ComfyUiJobCreate): Promise<ComfyUi
     }
     if (input.camera) form.append("camera", JSON.stringify(input.camera));
 
-    return requestJson<ComfyUiJobStatus>(`${COMFYUI_API_PATH}/jobs`, { method: "POST", body: form });
+    return requestJson<ComfyUiJobStatus>(`${COMFYUI_API_PATH}/jobs`, { method: "POST", body: form }, options);
 }
 
-export function getComfyUiJob(taskId: string): Promise<ComfyUiJobStatus> {
-    return requestJson<ComfyUiJobStatus>(jobPath(taskId));
+export type ComfyUiRequestOptions = { signal?: AbortSignal; timeoutMs?: number };
+
+export function getComfyUiJob(taskId: string, options: ComfyUiRequestOptions = {}): Promise<ComfyUiJobStatus> {
+    return requestJson<ComfyUiJobStatus>(jobPath(taskId), {}, options);
 }
 
-export async function getComfyUiOutput(taskId: string): Promise<Blob> {
-    const response = await request(jobPath(taskId, "/output"), { headers: { accept: "*/*" } });
-    return response.blob();
+export function getComfyUiOutput(taskId: string, options: ComfyUiRequestOptions = {}): Promise<Blob> {
+    return request(jobPath(taskId, "/output"), { headers: { accept: "image/png, image/webp" } }, options, async (response) => {
+        const mimeType = response.headers.get("content-type")?.split(";")[0].trim().toLowerCase();
+        if (!mimeType || !IMAGE_MIME_TYPES.has(mimeType)) {
+            throw new ComfyUiApiError("OUTPUT_INVALID", "ComfyUI 返回的内容不是 PNG/WebP 图片，请检查上游输出", 502);
+        }
+        let blob: Blob;
+        try {
+            blob = await response.blob();
+        } catch (error) {
+            if (isAbortError(error)) throw error;
+            throw new ComfyUiApiError("OUTPUT_FAILED", "图片下载中断，请重试或检查 ComfyUI 连接", 502, true);
+        }
+        if (!blob.size) throw new ComfyUiApiError("OUTPUT_INVALID", "ComfyUI 返回了空图片，请检查工作流输出", 502);
+        return blob;
+    });
 }
 
-export async function cancelComfyUiJob(taskId: string): Promise<void> {
-    await request(jobPath(taskId), { method: "DELETE" });
+export async function cancelComfyUiJob(taskId: string, options: ComfyUiRequestOptions = {}): Promise<void> {
+    await request(jobPath(taskId), { method: "DELETE" }, options, async () => undefined);
 }
 
 function jobPath(taskId: string, suffix = "") {
@@ -65,33 +80,76 @@ function imageFilename(name: string, mimeType: string) {
     return `${name}.${mimeType === "image/webp" ? "webp" : "png"}`;
 }
 
-async function request(input: string, init: RequestInit = {}): Promise<Response> {
-    let response: Response;
-    try {
-        response = await fetch(input, { ...init, headers: { accept: "application/json", ...init.headers } });
-    } catch (error) {
-        throw new ComfyUiApiError("COMFYUI_UNAVAILABLE", error instanceof Error ? error.message : "ComfyUI API is unavailable", 503, true);
-    }
-    if (response.ok) return response;
-
-    let payload: unknown;
-    try {
-        const jsonResponse = typeof response.clone === "function" ? response.clone() : response;
-        payload = await jsonResponse.json();
-    } catch {
-        payload = undefined;
-    }
-    const error = normalizeError(payload, response.status);
-    throw new ComfyUiApiError(error.code, error.message, response.status, error.retryable);
+function isAbortError(error: unknown): boolean {
+    return error instanceof Error && error.name === "AbortError";
 }
 
-async function requestJson<T>(input: string, init: RequestInit = {}): Promise<T> {
-    const response = await request(input, init);
+/** Abort also covers body consumption, not just receipt of HTTP headers. */
+export function withAbort<T>(operation: () => Promise<T>, signal: AbortSignal): Promise<T> {
+    if (signal.aborted) return Promise.reject(signal.reason);
+    return new Promise((resolve, reject) => {
+        const onAbort = () => reject(signal.reason);
+        signal.addEventListener("abort", onAbort, { once: true });
+        Promise.resolve()
+            .then(operation)
+            .then(
+                (value) => {
+                    signal.removeEventListener("abort", onAbort);
+                    resolve(value);
+                },
+                (error) => {
+                    signal.removeEventListener("abort", onAbort);
+                    reject(error);
+                },
+            );
+    });
+}
+
+async function request<T>(input: string, init: RequestInit, options: ComfyUiRequestOptions, read: (response: Response) => Promise<T>): Promise<T> {
+    const controller = new AbortController();
+    const onAbort = () => controller.abort(options.signal?.reason);
+    if (options.signal?.aborted) onAbort();
+    else options.signal?.addEventListener("abort", onAbort, { once: true });
+    const timer = setTimeout(() => controller.abort(new DOMException("ComfyUI request timed out", "TimeoutError")), options.timeoutMs ?? 60_000);
     try {
-        return (await response.json()) as T;
+        return await withAbort(async () => {
+            const response = await fetch(input, { ...init, signal: controller.signal, headers: { accept: "application/json", ...init.headers } });
+            if (!response.ok) {
+                let payload: unknown;
+                try {
+                    payload = await response.json();
+                } catch {
+                    payload = undefined;
+                }
+                const error = normalizeError(payload, response.status);
+                throw new ComfyUiApiError(error.code, error.message, response.status, error.retryable);
+            }
+            return read(response);
+        }, controller.signal);
     } catch (error) {
-        throw new ComfyUiApiError("COMFYUI_RESPONSE_INVALID", error instanceof Error ? error.message : "ComfyUI API returned invalid JSON", response.status, false);
+        if (controller.signal.aborted) {
+            if (controller.signal.reason?.name === "TimeoutError") {
+                throw new ComfyUiApiError("COMFYUI_TIMEOUT", "ComfyUI 请求超时，请检查连接后重试", 504, true);
+            }
+            throw controller.signal.reason;
+        }
+        if (error instanceof ComfyUiApiError || isAbortError(error)) throw error;
+        throw new ComfyUiApiError("COMFYUI_UNAVAILABLE", "无法连接 ComfyUI 网关，请检查服务配置", 503, true);
+    } finally {
+        clearTimeout(timer);
+        options.signal?.removeEventListener("abort", onAbort);
     }
+}
+
+function requestJson<T>(input: string, init: RequestInit = {}, options: ComfyUiRequestOptions = {}): Promise<T> {
+    return request(input, init, options, async (response) => {
+        try {
+            return (await response.json()) as T;
+        } catch (error) {
+            if (isAbortError(error)) throw error;
+            throw new ComfyUiApiError("COMFYUI_RESPONSE_INVALID", "ComfyUI 网关返回了无效 JSON", 502);
+        }
+    });
 }
 
 function normalizeError(payload: unknown, status: number): ComfyUiJobError {

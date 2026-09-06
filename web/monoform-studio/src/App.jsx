@@ -9,7 +9,7 @@ import {
 import { MainViewport, CameraPreview } from './Viewport.jsx'
 import { ShotsPanel } from './ShotsPanel.jsx'
 import { JOINT_DEFINITIONS, JOINT_GROUPS, RIG_PRESET_GROUPS, RIG_PRESET_OPTIONS, cloneJointPose, interpolateJointPose, normalizePoseId, poseCanLoop, poseForObject, presetJoints, presetPhase, presetRoot } from './rig.js'
-import { controlPassCamera, isCaptureBusy, isV1ControlPassList, validateControlCaptureResult } from './control-passes.js'
+import { controlPassCamera, isCaptureBusy, isV1ControlPassList, resolveControlCaptureSelection, validateControlCaptureResult } from './control-passes.js'
 
 const CAMERA_ID = '__shot_camera__'
 // When embedded with a ?key=... query (canvas director nodes), scope storage per node so multiple instances do not share a project.
@@ -1979,7 +1979,7 @@ export default function App() {
       const blob = await new Promise((resolve, reject) => canvas.toBlob(result => result ? resolve(result) : reject(new Error('PNG 生成失败')), 'image/png'))
       // Notify the embedding canvas host so the frame can be inserted directly as a canvas image node.
       if (window.parent && window.parent !== window) {
-        window.parent.postMessage({ source: 'monoform', type: 'export', kind: 'image', blob, width, height }, '*')
+        window.parent.postMessage({ source: 'monoform', type: 'export', kind: 'image', blob, width, height }, directorParentOrigin())
       }
       const link = document.createElement('a')
       const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
@@ -2010,20 +2010,21 @@ export default function App() {
       error.code = 'UNSUPPORTED_CAPABILITY'
       throw error
     }
-    const outputWidth = Math.max(1, Math.round(Number(width)))
-    const outputHeight = Math.max(1, Math.round(Number(height)))
-    if (!Number.isFinite(outputWidth) || !Number.isFinite(outputHeight)) {
+    const outputWidth = Number(width)
+    const outputHeight = Number(height)
+    if (!Number.isInteger(outputWidth) || !Number.isInteger(outputHeight) || outputWidth < 1 || outputHeight < 1 || outputWidth > 4096 || outputHeight > 4096) {
       const error = new Error('控制图尺寸无效')
       error.code = 'INVALID_REQUEST'
       throw error
     }
 
+    const selection = resolveControlCaptureSelection({ shotId, frame }, { activeShotId, currentFrame: currentFrameRef.current, totalFrames })
     controlCaptureLockRef.current = true
     exportLockRef.current = true
     const wasPlaying = playingRef.current
     setPlaying(false)
     controlCaptureCanvasRefs.current = { pose: null, depth: null }
-    const captureFrame = clamp(normalizeFrameNumber(frame), 0, totalFrames)
+    const captureFrame = selection.frame
     const shotCamera = keyframes.length ? cameraAtFrame(keyframes, captureFrame, camera.aspectRatio) : camera
     const captureCamera = controlPassCamera(shotCamera, { width: outputWidth, height: outputHeight })
     const captureObjects = hasObjectAnimation
@@ -2032,7 +2033,7 @@ export default function App() {
 
     try {
       setControlCapture({
-        shotId: shotId || activeShotId,
+        shotId: selection.shotId,
         frame: captureFrame,
         width: outputWidth,
         height: outputHeight,
@@ -2056,7 +2057,7 @@ export default function App() {
         toPng(controlCaptureCanvasRefs.current.depth),
       ])
       const result = {
-        shotId: shotId || activeShotId,
+        shotId: selection.shotId,
         frame: captureFrame,
         pose: { blob: poseBlob, mimeType: 'image/png', width: outputWidth, height: outputHeight },
         depth: { blob: depthBlob, mimeType: 'image/png', width: outputWidth, height: outputHeight },
@@ -2184,7 +2185,7 @@ export default function App() {
       const blob = new Blob([buffer], { type: 'video/mp4' })
       // Notify the embedding canvas host so the video can be inserted directly as a canvas video node.
       if (window.parent && window.parent !== window) {
-        window.parent.postMessage({ source: 'monoform', type: 'export', kind: 'video', blob }, '*')
+        window.parent.postMessage({ source: 'monoform', type: 'export', kind: 'video', blob }, directorParentOrigin())
       }
       const link = document.createElement('a')
       const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')

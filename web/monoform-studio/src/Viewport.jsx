@@ -4,7 +4,7 @@ import { ContactShadows, Grid, OrbitControls, TransformControls, useGLTF } from 
 import * as THREE from 'three'
 import { clone as skeletonClone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { OPENPOSE_JOINT_MAPPING, poseForObject, presetDefinition } from './rig.js'
-import { captureProjectionSpec, isControlRenderMode, poseConnections, projectPoseKeypoints } from './control-passes.js'
+import { buildOpenPosePrimitives, captureProjectionSpec, isControlRenderMode, projectPoseKeypoints } from './control-passes.js'
 
 const CAMERA_ID = '__shot_camera__'
 const BUILT_IN_MODEL_URL = `${import.meta.env.BASE_URL}models/xbot-animated.glb`
@@ -1334,8 +1334,7 @@ function createPoseCanvas({ objects, cameraData, width, height, liveJointPositio
   context.lineCap = 'round'
   context.lineJoin = 'round'
 
-  const palettes = ['#ff4055', '#36d6ff', '#8dff5a', '#ffd54a', '#d88dff']
-  objects.filter(object => object.type === 'person' && object.visible !== false).forEach((object, objectIndex) => {
+  objects.filter(object => object.type === 'person' && object.visible !== false).forEach(object => {
     const points = projectPoseKeypoints({
       object,
       camera: cameraData,
@@ -1343,25 +1342,21 @@ function createPoseCanvas({ objects, cameraData, width, height, liveJointPositio
       height: canvas.height,
       worldJointPositions: liveJointPositions?.[object.id],
     })
-    const byName = new Map(points.map(point => [point.name, point]))
-    const color = palettes[objectIndex % palettes.length]
-    context.strokeStyle = color
-    context.fillStyle = color
+    const { limbs, joints } = buildOpenPosePrimitives(points)
     context.lineWidth = Math.max(2, Math.round(Math.min(canvas.width, canvas.height) * 0.008))
-
-    for (const [from, to] of poseConnections) {
-      const start = byName.get(from)
-      const end = byName.get(to)
-      if (!start?.visible || !end?.visible) continue
+    context.globalAlpha = 0.6
+    for (const { from, to, color } of limbs) {
+      context.strokeStyle = color
       context.beginPath()
-      context.moveTo(start.x, start.y)
-      context.lineTo(end.x, end.y)
+      context.moveTo(from.x, from.y)
+      context.lineTo(to.x, to.y)
       context.stroke()
     }
-    for (const point of points) {
-      if (!point.visible) continue
+    context.globalAlpha = 1
+    for (const { point, color } of joints) {
+      context.fillStyle = color
       context.beginPath()
-      context.arc(point.x, point.y, Math.max(3, Math.round(context.lineWidth * 1.2)), 0, Math.PI * 2)
+      context.arc(point.x, point.y, Math.max(3, Math.round(context.lineWidth)), 0, Math.PI * 2)
       context.fill()
     }
   })
@@ -1393,7 +1388,9 @@ function LinearDepthMaterial({ near, far }) {
     next.onBeforeCompile = shader => {
       shader.uniforms.controlNear = { value: near }
       shader.uniforms.controlFar = { value: far }
-      shader.fragmentShader = shader.fragmentShader.replace(
+      // JS uniform entries do not declare GLSL variables. Declare both before
+      // patching Three's depth fragment, otherwise WebGL silently renders a blank pass.
+      shader.fragmentShader = `uniform float controlNear;\nuniform float controlFar;\n${shader.fragmentShader}`.replace(
         'gl_FragColor = vec4( vec3( 1.0 - fragCoordZ ), opacity );',
         'float controlViewZ = perspectiveDepthToViewZ(fragCoordZ, controlNear, controlFar); float controlDepth = clamp((-controlViewZ - controlNear) / max(0.0001, controlFar - controlNear), 0.0, 1.0); gl_FragColor = vec4(vec3(1.0 - controlDepth), opacity);',
       )

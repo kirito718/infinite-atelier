@@ -99,3 +99,32 @@ describe("same-origin ComfyUI director client", () => {
         });
     });
 });
+
+describe("ComfyUI client cancellation and output boundaries", () => {
+    it("preserves AbortError and forwards the signal rather than reporting cancellation as an outage", async () => {
+        const controller = new AbortController();
+        const failure = new DOMException("cancelled", "AbortError");
+        const fetchMock = vi.spyOn(globalThis, "fetch").mockRejectedValue(failure);
+        await expect(getComfyUiJob("task-1", { signal: controller.signal })).rejects.toMatchObject({ name: "AbortError" });
+        expect(fetchMock.mock.calls[0][1]?.signal).toBeInstanceOf(AbortSignal);
+    });
+    it("wraps output-body failures in an actionable typed error", async () => {
+        const response = new Response("png", { headers: { "content-type": "image/png" } });
+        vi.spyOn(response, "blob").mockRejectedValue(new TypeError("stream disconnected"));
+        vi.spyOn(globalThis, "fetch").mockResolvedValue(response);
+        await expect(getComfyUiOutput("task-1")).rejects.toMatchObject({ code: "OUTPUT_FAILED", retryable: true });
+    });
+    it("rejects successful HTML and empty-image responses before storing them on the canvas", async () => {
+        vi.spyOn(globalThis, "fetch")
+            .mockResolvedValueOnce(new Response("<html>login</html>", { headers: { "content-type": "text/html" } }))
+            .mockResolvedValueOnce(new Response(null, { headers: { "content-type": "image/png" } }));
+        await expect(getComfyUiOutput("task-1")).rejects.toMatchObject({ code: "OUTPUT_INVALID" });
+        await expect(getComfyUiOutput("task-1")).rejects.toMatchObject({ code: "OUTPUT_INVALID" });
+    });
+    it("times out even when response headers arrived but the body never finishes", async () => {
+        const response = new Response("png", { headers: { "content-type": "image/png" } });
+        vi.spyOn(response, "blob").mockReturnValue(new Promise(() => {}));
+        vi.spyOn(globalThis, "fetch").mockResolvedValue(response);
+        await expect(getComfyUiOutput("task-1", { timeoutMs: 10 })).rejects.toMatchObject({ code: "COMFYUI_TIMEOUT", retryable: true });
+    });
+});
