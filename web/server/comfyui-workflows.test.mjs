@@ -80,3 +80,42 @@ test("rejects a manifest that targets a missing workflow node", async () => {
         (error) => error instanceof WorkflowRegistryError && error.code === "WORKFLOW_MANIFEST_INVALID",
     );
 });
+
+test("rejects inherited node, input, logical-key, and output-node properties with controlled errors", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "atelier-comfy-workflow-"));
+    await writeFile(join(directory, "workflow.json"), JSON.stringify({ 1: { class_type: "LoadImage", inputs: { image: "pose.png" } } }));
+
+    for (const manifest of [
+        {
+            id: "inherited-input",
+            file: "workflow.json",
+            inputNodes: { pose: { nodeId: "1", input: "constructor" } },
+            outputNode: "1",
+        },
+        {
+            id: "inherited-output",
+            file: "workflow.json",
+            inputNodes: { pose: { nodeId: "1", input: "image" } },
+            outputNode: "__proto__",
+        },
+        {
+            id: "inherited-node",
+            file: "workflow.json",
+            inputNodes: { pose: { nodeId: "__proto__", input: "image" } },
+            outputNode: "1",
+        },
+    ]) {
+        assert.throws(
+            () => createWorkflowRegistry({ directory, manifests: [manifest] }),
+            (error) => error instanceof WorkflowRegistryError && error.code === "WORKFLOW_MANIFEST_INVALID",
+        );
+    }
+
+    const registry = createWorkflowRegistry({ directory, manifests: [{ id: "safe", file: "workflow.json", inputNodes: { pose: { nodeId: "1", input: "image" } }, outputNode: "1" }] });
+    for (const logicalKey of ["constructor", "__proto__"]) {
+        assert.throws(
+            () => registry.patch("safe", JSON.parse(`{"${logicalKey}":"untrusted"}`)),
+            (error) => error instanceof WorkflowRegistryError && error.code === "WORKFLOW_INPUT_UNKNOWN",
+        );
+    }
+});

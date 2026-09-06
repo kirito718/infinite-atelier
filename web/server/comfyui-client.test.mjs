@@ -125,10 +125,11 @@ test("retrieves history, selects the declared output, and downloads its bytes", 
     assert.equal(calls[1].url, "http://comfyui.internal:8188/view?filename=final.png&subfolder=director&type=output");
 });
 
-test("sends a targeted interrupt payload for the queued prompt", async () => {
+test("sends a job-scoped cancel request with the configured API prefix", async () => {
     const calls = [];
     const client = createComfyUiClient({
         baseUrl: "http://comfyui.internal:8188",
+        apiPrefix: "/api",
         fetchImpl: async (url, init) => {
             calls.push({ url, init });
             return new Response(null, { status: 204 });
@@ -138,9 +139,37 @@ test("sends a targeted interrupt payload for the queued prompt", async () => {
 
     await client.interrupt("prompt-1");
 
-    assert.equal(calls[0].url, "http://comfyui.internal:8188/interrupt");
+    assert.equal(calls[0].url, "http://comfyui.internal:8188/api/jobs/prompt-1/cancel");
     assert.equal(calls[0].init.method, "POST");
-    assert.deepEqual(JSON.parse(calls[0].init.body), { prompt_id: "prompt-1" });
+    assert.equal(calls[0].init.body, undefined);
+});
+
+test("reports that job-scoped cancellation is unsupported instead of falling back to legacy interrupt", async () => {
+    const calls = [];
+    const client = createComfyUiClient({
+        baseUrl: "http://comfyui.internal:8188",
+        fetchImpl: async (url, init) => {
+            calls.push({ url, init });
+            return new Response("not found", { status: 404 });
+        },
+        websocketFactory: unavailableWebSocket,
+    });
+
+    await assert.rejects(client.interrupt("prompt-1"), (error) => error.code === "COMFYUI_TARGETED_CANCEL_UNSUPPORTED");
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, "http://comfyui.internal:8188/jobs/prompt-1/cancel");
+});
+
+test("reports a clear capability error when the default WebSocket implementation is unavailable", async () => {
+    const originalWebSocket = globalThis.WebSocket;
+    try {
+        globalThis.WebSocket = undefined;
+        const client = createComfyUiClient({ baseUrl: "http://comfyui.internal:8188", fetchImpl: unavailableFetch });
+
+        await assert.rejects(client.waitForCompletion({ clientId: "client-1", promptId: "prompt-1" }), (error) => error instanceof ComfyUiWebSocketError && error.code === "COMFYUI_WEBSOCKET_UNAVAILABLE");
+    } finally {
+        globalThis.WebSocket = originalWebSocket;
+    }
 });
 
 class WebSocketDouble {

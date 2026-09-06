@@ -13,13 +13,14 @@ export class ComfyUiWebSocketError extends ComfyUiClientError {
     }
 }
 
-export function createComfyUiClient({ baseUrl, apiPrefix = "", fetchImpl = globalThis.fetch, websocketFactory = (url) => new WebSocket(url), timeoutMs = 120_000 } = {}) {
+export function createComfyUiClient({ baseUrl, apiPrefix = "", fetchImpl = globalThis.fetch, websocketFactory, timeoutMs = 120_000 } = {}) {
     const requestBaseUrl = normalizeBaseUrl(baseUrl);
     const prefix = normalizeApiPrefix(apiPrefix);
+    const resolvedWebsocketFactory = websocketFactory ?? createDefaultWebSocketFactory;
     if (typeof fetchImpl !== "function") {
         throw new ComfyUiClientError("COMFYUI_FETCH_UNAVAILABLE", "A fetch implementation is required");
     }
-    if (typeof websocketFactory !== "function") {
+    if (typeof resolvedWebsocketFactory !== "function") {
         throw new ComfyUiClientError("COMFYUI_WEBSOCKET_UNAVAILABLE", "A WebSocket factory is required");
     }
 
@@ -34,7 +35,9 @@ export function createComfyUiClient({ baseUrl, apiPrefix = "", fetchImpl = globa
             throw new ComfyUiClientError("COMFYUI_UNAVAILABLE", `ComfyUI request failed: ${error instanceof Error ? error.message : String(error)}`, error);
         }
         if (!response?.ok) {
-            throw new ComfyUiClientError("COMFYUI_HTTP_ERROR", `ComfyUI request failed with status ${response?.status ?? "unknown"}: ${await responseErrorMessage(response)}`);
+            const error = new ComfyUiClientError("COMFYUI_HTTP_ERROR", `ComfyUI request failed with status ${response?.status ?? "unknown"}: ${await responseErrorMessage(response)}`);
+            error.status = response?.status;
+            throw error;
         }
         return response;
     };
@@ -94,7 +97,7 @@ export function createComfyUiClient({ baseUrl, apiPrefix = "", fetchImpl = globa
                 return Promise.reject(new ComfyUiWebSocketError("COMFYUI_WEBSOCKET_INVALID", "clientId and promptId are required"));
             }
             return waitForCompletion({
-                websocketFactory,
+                websocketFactory: resolvedWebsocketFactory,
                 websocketUrl: buildWebSocketUrl(requestBaseUrl, prefix, clientId),
                 promptId,
                 onProgress,
@@ -128,11 +131,14 @@ export function createComfyUiClient({ baseUrl, apiPrefix = "", fetchImpl = globa
             if (typeof promptId !== "string" || !promptId) {
                 throw new ComfyUiClientError("COMFYUI_INTERRUPT_INVALID", "promptId is required");
             }
-            await request("/interrupt", {
-                method: "POST",
-                headers: { "content-type": "application/json" },
-                body: JSON.stringify({ prompt_id: promptId }),
-            });
+            try {
+                await request(`/jobs/${encodeURIComponent(promptId)}/cancel`, { method: "POST" });
+            } catch (error) {
+                if (error instanceof ComfyUiClientError && [404, 405, 501].includes(error.status)) {
+                    throw new ComfyUiClientError("COMFYUI_TARGETED_CANCEL_UNSUPPORTED", "Configured ComfyUI endpoint does not support job-scoped cancellation", error);
+                }
+                throw error;
+            }
         },
     };
 }
@@ -190,7 +196,7 @@ function waitForCompletion({ websocketFactory, websocketUrl, promptId, onProgres
         try {
             socket = websocketFactory(websocketUrl);
         } catch (error) {
-            settle(new ComfyUiWebSocketError("COMFYUI_WEBSOCKET_DISCONNECTED", "Could not connect to ComfyUI WebSocket", error));
+            settle(error instanceof ComfyUiWebSocketError ? error : new ComfyUiWebSocketError("COMFYUI_WEBSOCKET_DISCONNECTED", "Could not connect to ComfyUI WebSocket", error));
             return;
         }
 
@@ -230,6 +236,13 @@ function addSocketListener(socket, type, listener) {
         return () => socket.off?.(type, listener) || socket.removeListener?.(type, listener);
     }
     throw new ComfyUiWebSocketError("COMFYUI_WEBSOCKET_UNSUPPORTED", "WebSocket does not support event listeners");
+}
+
+function createDefaultWebSocketFactory(url) {
+    if (typeof globalThis.WebSocket !== "function") {
+        throw new ComfyUiWebSocketError("COMFYUI_WEBSOCKET_UNAVAILABLE", "A global WebSocket implementation is required; run Atelier with Node.js 22 or provide websocketFactory");
+    }
+    return new globalThis.WebSocket(url);
 }
 
 function parseSocketMessage(event) {

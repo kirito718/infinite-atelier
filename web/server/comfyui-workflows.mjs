@@ -66,9 +66,12 @@ export function createWorkflowRegistry({ directory, manifests }) {
             const entry = getEntry(workflowId);
             const patched = cloneEntry(entry);
             for (const [logicalName, value] of Object.entries(inputs)) {
-                const target = patched.manifest.inputNodes[logicalName];
-                if (!target) {
+                if (!hasOwn(patched.manifest.inputNodes, logicalName)) {
                     throw new WorkflowRegistryError("WORKFLOW_INPUT_UNKNOWN", `Unknown workflow input: ${logicalName}`);
+                }
+                const target = patched.manifest.inputNodes[logicalName];
+                if (!hasOwn(patched.workflow, target.nodeId) || !hasOwn(patched.workflow[target.nodeId].inputs, target.input)) {
+                    throw new WorkflowRegistryError("WORKFLOW_MANIFEST_INVALID", `Workflow ${workflowId} has an invalid input target for ${logicalName}`);
                 }
                 patched.workflow[target.nodeId].inputs[target.input] = value;
             }
@@ -98,12 +101,12 @@ function loadWorkflowEntry(directory, manifest) {
 
     for (const [logicalName, target] of Object.entries(manifest.inputNodes)) {
         const node = workflow[target.nodeId];
-        if (!isRecord(node) || !isRecord(node.inputs) || !(target.input in node.inputs)) {
+        if (!hasOwn(workflow, target.nodeId) || !isRecord(node) || !hasOwn(node, "inputs") || !isRecord(node.inputs) || !hasOwn(node.inputs, target.input)) {
             throw new WorkflowRegistryError("WORKFLOW_MANIFEST_INVALID", `Workflow ${manifest.id} input ${logicalName} targets missing node input ${target.nodeId}.${target.input}`);
         }
     }
 
-    if (!isRecord(workflow[manifest.outputNode])) {
+    if (!hasOwn(workflow, manifest.outputNode) || !isRecord(workflow[manifest.outputNode])) {
         throw new WorkflowRegistryError("WORKFLOW_MANIFEST_INVALID", `Workflow ${manifest.id} output node ${manifest.outputNode} does not exist`);
     }
 
@@ -111,14 +114,14 @@ function loadWorkflowEntry(directory, manifest) {
 }
 
 function validateManifestShape(manifest) {
-    if (!isRecord(manifest) || typeof manifest.id !== "string" || !manifest.id || typeof manifest.file !== "string" || !manifest.file) {
+    if (!isRecord(manifest) || !hasOwn(manifest, "id") || typeof manifest.id !== "string" || !manifest.id || !hasOwn(manifest, "file") || typeof manifest.file !== "string" || !manifest.file) {
         throw new WorkflowRegistryError("WORKFLOW_MANIFEST_INVALID", "Workflow manifest requires id and file");
     }
-    if (!isRecord(manifest.inputNodes) || typeof manifest.outputNode !== "string" || !manifest.outputNode) {
+    if (!hasOwn(manifest, "inputNodes") || !isRecord(manifest.inputNodes) || !hasOwn(manifest, "outputNode") || typeof manifest.outputNode !== "string" || !manifest.outputNode) {
         throw new WorkflowRegistryError("WORKFLOW_MANIFEST_INVALID", `Workflow manifest ${manifest.id} requires inputNodes and outputNode`);
     }
     for (const [logicalName, target] of Object.entries(manifest.inputNodes)) {
-        if (!isRecord(target) || typeof target.nodeId !== "string" || !target.nodeId || typeof target.input !== "string" || !target.input) {
+        if (!isRecord(target) || !hasOwn(target, "nodeId") || typeof target.nodeId !== "string" || !target.nodeId || !hasOwn(target, "input") || typeof target.input !== "string" || !target.input) {
             throw new WorkflowRegistryError("WORKFLOW_MANIFEST_INVALID", `Workflow manifest ${manifest.id} has an invalid input target for ${logicalName}`);
         }
     }
@@ -134,4 +137,8 @@ function clone(value) {
 
 function isRecord(value) {
     return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function hasOwn(value, key) {
+    return isRecord(value) && Object.hasOwn(value, key);
 }
