@@ -10,7 +10,7 @@ export type ComfyUiJobState =
   | "cancelled";
 
 export interface ComfyUiJobCreate {
-  workflowId: "portrait-pose-depth" | string;
+  workflowId: "portrait-pose-depth";
   prompt: string;
   negativePrompt?: string;
   seed?: number;

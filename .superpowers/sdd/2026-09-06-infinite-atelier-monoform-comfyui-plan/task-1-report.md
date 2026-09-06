@@ -29,3 +29,22 @@ The validator accepts only the supported protocol/version, source, message type,
 ## Concerns
 
 The ComfyUI job contracts intentionally leave `workflowId` extensible for future workflow registry entries while retaining `portrait-pose-depth` as the first known workflow. Later tasks should keep server-side validation stricter than the browser-facing type.
+
+## Review fixes
+
+- `isAllowedDirectorEvent` now rejects a null iframe window even when the event source is also null; a regression test covers this confused-deputy case.
+- `ComfyUiJobCreate.workflowId` is now constrained to the first-release literal `portrait-pose-depth` instead of widening to `string`.
+
+Verification after fixes:
+
+```text
+$ npm run test:unit -- src/lib/director-message.test.ts
+Test Files  1 passed (1)
+Tests       4 passed (4)
+
+$ npm run typecheck
+tsc --noEmit: passed
+
+$ git diff --check
+passed
+```

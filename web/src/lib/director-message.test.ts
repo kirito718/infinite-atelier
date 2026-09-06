@@ -70,5 +70,12 @@ describe("director iframe message validation", () => {
         "http://localhost:3000",
       ),
     ).toBe(false);
+    expect(
+      isAllowedDirectorEvent(
+        { origin: "http://localhost:3000", source: null, data: {} } as MessageEvent,
+        null,
+        "http://localhost:3000",
+      ),
+    ).toBe(false);
   });
 });

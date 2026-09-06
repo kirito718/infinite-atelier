@@ -133,4 +133,4 @@ export const isAllowedDirectorEvent = (
   event: MessageEvent,
   iframeWindow: Window | null,
   expectedOrigin: string,
-): boolean => event.source === iframeWindow && event.origin === expectedOrigin;
+): boolean => iframeWindow !== null && event.source === iframeWindow && event.origin === expectedOrigin;
