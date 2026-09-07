@@ -1,3 +1,5 @@
+import { accountRequestOptions } from "@/services/account-client";
+import { authenticatedFetch as fetch } from "@/services/account-client";
 import axios from "axios";
 
 import i18n from "@/i18n";
@@ -411,7 +413,7 @@ function geminiModelName(model: string) {
 function geminiApiUrl(config: Pick<AiConfig, "baseUrl" | "model">, action?: "generateContent" | "streamGenerateContent") {
     const baseUrl = geminiBaseUrl(config);
     const url = !action ? `${baseUrl}/models` : `${baseUrl}/models/${encodeURIComponent(geminiModelName(config.model))}:${action}`;
-    return proxyApiUrl(url);
+    return proxyApiUrl(action === "streamGenerateContent" ? `${url}?alt=sse` : url);
 }
 
 function geminiHeaders(config: Pick<AiConfig, "apiKey">) {
@@ -654,7 +656,7 @@ function toGeminiToolOptions(tools: ResponseFunctionTool[], toolChoice: ToolChoi
 }
 
 async function requestGeminiStreamingResponse(config: AiConfig, body: Record<string, unknown>, onDelta?: (text: string) => void, options?: RequestOptions): Promise<ToolResponseResult> {
-    const response = await fetch(`${geminiApiUrl(config, "streamGenerateContent")}?alt=sse`, {
+    const response = await fetch(geminiApiUrl(config, "streamGenerateContent"), {
         method: "POST",
         headers: geminiHeaders(config),
         body: JSON.stringify(body),
@@ -769,6 +771,7 @@ function parseGeminiImagePayload(payload: GeminiPayload) {
 }
 
 export async function requestGeneration(config: AiConfig, prompt: string, options?: RequestOptions) {
+    options = accountRequestOptions(options);
     const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     const script = resolveModelScript(config, config.model || config.imageModel);
@@ -820,6 +823,7 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
 }
 
 export async function requestEdit(config: AiConfig, prompt: string, references: ReferenceImage[], mask?: ReferenceImage, options?: RequestOptions) {
+    options = accountRequestOptions(options);
     const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     const requestPrompt = buildImageReferencePromptText(prompt, references);
@@ -872,6 +876,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
 }
 
 export async function requestImageQuestion(config: AiConfig, messages: AiTextMessage[], onDelta: (text: string) => void, options?: RequestOptions) {
+    options = accountRequestOptions(options);
     const requestConfig = resolveModelRequestConfig(config, config.model || config.textModel);
     const script = resolveModelScript(config, config.model || config.textModel);
     if (script) {

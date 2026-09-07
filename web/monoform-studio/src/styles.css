@@ -475,3 +475,13 @@ button:disabled { opacity: .28; cursor: not-allowed !important; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+.account-gate { min-height: 100%; padding: 32px; display: grid; place-items: center; }
+.account-gate > section { width: min(100%, 560px); padding: 28px; border: 1px solid var(--line); border-radius: var(--radius-panel); background: var(--panel); }
+.account-gate h1 { margin-top: 0; font-size: 20px; letter-spacing: .1em; }
+.account-gate p { color: var(--text-dim); line-height: 1.6; overflow-wrap: anywhere; }
+.account-gate a, .persistence-notice a { color: var(--accent); text-underline-offset: 3px; }
+.account-gate button, .persistence-notice button { padding: 6px 10px; margin: 4px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--panel-raised); color: var(--text); cursor: pointer; }
+.persistence-notice { flex: 0 0 auto; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 7px 12px; border-bottom: 1px solid var(--danger); background: #322622; color: var(--text); font-size: 12px; }
+.persistence-notice > span { flex: 1 1 360px; overflow-wrap: anywhere; }
+.persistence-notice button { flex: 0 0 auto; }

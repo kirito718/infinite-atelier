@@ -1,3 +1,4 @@
+import { authenticatedFetch as fetch } from "@/services/account-client";
 import type { ReferenceImage } from "@/types/image";
 import { imageToDataUrl } from "@/services/image-storage";
 

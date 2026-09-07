@@ -1,117 +1,54 @@
-import { Readable } from "node:stream";
-import type { IncomingMessage } from "node:http";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
-import { createCodexSubscriptionApi } from "./server/codex-subscription-api.mjs";
-import { defineConfig, type Plugin } from "vite";
+import { defineConfig, loadEnv, normalizePath, type Plugin } from "vite";
+import { createAccountApi } from "./server/account-api.mjs";
+import { resolveAccountDataDir } from "./server/account-paths.mjs";
 
 const webDir = dirname(fileURLToPath(import.meta.url));
 
-// Dev-server forward proxy for CORS-blocked API targets (relay/中转 API providers usually
-// do not send CORS headers). Frontend calls /api-proxy?target=<full api url>; this middleware
-// forwards the request server-side and streams the response back, bypassing browser CORS.
-function apiProxyPlugin(): Plugin {
-    return {
-        name: "canvas-api-proxy",
-        apply: "serve",
-        configureServer(server) {
-            server.middlewares.use("/api-proxy", (req, res, next) => {
-                void (async () => {
-                    try {
-                        const url = new URL(req.url || "", "http://localhost");
-                        const target = url.searchParams.get("target");
-                        if (!target) {
-                            res.statusCode = 400;
-                            res.end("missing target");
-                            return;
-                        }
-                        const targetUrl = new URL(target);
-                        const headers: Record<string, string> = {};
-                        for (const [key, value] of Object.entries(req.headers)) {
-                            if (!value || ["host", "connection", "content-length", "transfer-encoding"].includes(key)) continue;
-                            headers[key] = Array.isArray(value) ? value.join(", ") : value;
-                        }
-                        headers.host = targetUrl.host;
-                        const body = ["POST", "PUT", "PATCH"].includes(req.method || "") ? await readRequestBody(req) : undefined;
-                        const upstream = await fetch(targetUrl, {
-                            method: req.method,
-                            headers,
-                            body: body ? new Uint8Array(body) : undefined,
-                            signal: AbortSignal.timeout(300_000),
-                        });
-                        res.statusCode = upstream.status;
-                        upstream.headers.forEach((value, key) => {
-                            if (!["content-encoding", "content-length", "transfer-encoding", "connection"].includes(key)) res.setHeader(key, value);
-                        });
-                        if (upstream.body) {
-                            const stream = Readable.fromWeb(upstream.body as import("node:stream/web").ReadableStream);
-                            stream.pipe(res);
-                        } else {
-                            res.end();
-                        }
-                    } catch (error) {
-                        res.statusCode = 502;
-                        res.end(`proxy error: ${error instanceof Error ? error.message : String(error)}`);
-                    }
-                })();
-            });
-        },
-    };
-}
-
-function readRequestBody(req: IncomingMessage): Promise<Buffer | undefined> {
-    return new Promise((resolveBody) => {
-        const chunks: Buffer[] = [];
-        req.on("data", (chunk) => chunks.push(chunk));
-        req.on("end", () => resolveBody(chunks.length ? Buffer.concat(chunks) : undefined));
-        req.on("error", () => resolveBody(undefined));
-    });
-}
-
-export function codexSubscriptionApiPlugin({ createApi = createCodexSubscriptionApi } = {}): Plugin {
-    let api: ReturnType<typeof createCodexSubscriptionApi> | undefined;
-
-    const getApi = () => {
-        api ??= createApi();
-        return api;
-    };
-
-    const middleware = (request: IncomingMessage, response: import("node:http").ServerResponse, next: () => void) => {
-        if (!(request.url || "").startsWith("/api/codex-subscription")) {
+// Keep this exported name for existing integrations; the factory now owns ALL
+// authenticated APIs, so there is no unguarded proxy or shared Codex endpoint.
+export function codexSubscriptionApiPlugin({ createApi = createAccountApi } = {}): Plugin {
+    let api: ReturnType<typeof createAccountApi> | undefined;
+    const middleware = (request: IncomingMessage, response: ServerResponse, next: () => void) => {
+        const pathname = new URL(request.url || "/", "http://localhost").pathname;
+        if (!/^\/api\/(account|codex-subscription)(\/|$)/.test(pathname) && pathname !== "/api-proxy") {
             next();
             return;
         }
-        void getApi()
-            .handle(request, response)
-            .catch((error) => {
-                if (response.headersSent) return;
-                response.statusCode = 500;
-                response.end(error instanceof Error ? error.message : String(error));
-            });
+        try {
+            api ??= createApi();
+            void api.handle(request, response);
+        } catch {
+            response.writeHead(503, { "content-type": "application/json", "cache-control": "no-store" });
+            response.end(JSON.stringify({ code: "STORAGE_UNAVAILABLE", error: "服务端存储不可用，请检查数据目录、权限和加密密钥。" }));
+        }
     };
-
     const attach = (server: any) => {
         server.middlewares.use(middleware);
         server.httpServer?.once("close", () => void api?.close());
     };
-
-    return {
-        name: "infinite-atelier-codex-subscription-api",
-        configureServer: attach,
-        configurePreviewServer: attach,
-    };
+    return { name: "infinite-atelier-account-api", configureServer: attach, configurePreviewServer: attach };
 }
 
-export default defineConfig({
-    base: process.env.VITE_BASE || "/",
-    server: {
-        allowedHosts: ["siyuan.kirito.work"],
-    },
-    plugins: [react(), apiProxyPlugin(), codexSubscriptionApiPlugin()],
-    resolve: {
-        alias: {
-            "@": resolve(webDir, "src"),
+export default defineConfig(({ mode }) => {
+    // Server-only configuration is never exposed as VITE_* browser variables.
+    const env = loadEnv(mode, webDir, "ATELIER_");
+    for (const [key, value] of Object.entries(env)) if (process.env[key] === undefined) process.env[key] = value;
+    const configuredDataDir = normalizePath(resolve(process.env.ATELIER_DATA_DIR || resolve(webDir, "data")));
+    const dataDir = normalizePath(resolveAccountDataDir());
+    const host = process.env.ATELIER_PUBLIC_URL ? new URL(process.env.ATELIER_PUBLIC_URL).hostname : undefined;
+    return {
+        base: process.env.VITE_BASE || "/",
+        server: {
+            allowedHosts: ["siyuan.kirito.work", ...(host ? [host] : [])],
+            // Vite serves source files in dev. Never let /data or /@fs expose the
+            // SQLite database, encryption key, user uploads or Codex credentials.
+            fs: { deny: [".env", ".env.*", "*.{crt,pem}", "**/.git/**", `${dataDir}/**`, `${configuredDataDir}/**`, "**/encryption.key", "**/atelier.sqlite*"] },
         },
-    },
+        plugins: [react(), codexSubscriptionApiPlugin()],
+        resolve: { alias: { "@": resolve(webDir, "src") } },
+    };
 });

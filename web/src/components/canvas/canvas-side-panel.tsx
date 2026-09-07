@@ -1,3 +1,4 @@
+import { useAccountAction, useAccountAsyncAction } from "@/hooks/use-account-action";
 import { memo, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { App, Button, Empty, Input, Popconfirm, Select, Spin, Tag } from "antd";
 import { useQuery } from "@tanstack/react-query";
@@ -9,8 +10,8 @@ import { canvasThemes, type CanvasTheme } from "@/lib/canvas-theme";
 import { exportCanvasNodes } from "@/lib/canvas/canvas-export";
 import { getNodeDefinition } from "@/lib/canvas/node-registry";
 import { cn } from "@/lib/utils";
-import { uploadMediaFile } from "@/services/file-storage";
-import { resolveImageUrl, uploadImage } from "@/services/image-storage";
+import { uploadMediaFile as uploadMediaFileApi } from "@/services/file-storage";
+import { resolveImageUrl, uploadImage as uploadImageApi } from "@/services/image-storage";
 import { useAssetStore, type Asset, type AssetKind } from "@/stores/use-asset-store";
 import { useGenerationHistoryStore, type GenerationHistoryRecord } from "@/stores/canvas/use-generation-history-store";
 import { CANVAS_SIDE_PANEL_MAX_WIDTH, CANVAS_SIDE_PANEL_MIN_WIDTH, CANVAS_SIDE_PANEL_MOTION_MS, useCanvasSidePanelStore } from "@/stores/use-canvas-side-panel-store";
@@ -285,11 +286,13 @@ function buildInsertPayload(asset: Asset): InsertAssetPayload {
 }
 
 const CanvasAssetsTab = memo(function CanvasAssetsTab({ onInsert, theme }: { onInsert: (payload: InsertAssetPayload) => void; theme: CanvasTheme }) {
+    const uploadImage = useAccountAsyncAction(uploadImageApi);
+    const uploadMediaFile = useAccountAsyncAction(uploadMediaFileApi);
     const { message } = App.useApp();
     const { t } = useTranslation();
     const assets = useAssetStore((state) => state.assets);
-    const addAsset = useAssetStore((state) => state.addAsset);
-    const removeAsset = useAssetStore((state) => state.removeAsset);
+    const addAsset = useAccountAction(useAssetStore((state) => state.addAsset));
+    const removeAsset = useAccountAction(useAssetStore((state) => state.removeAsset));
     const [keyword, setKeyword] = useState("");
     const [tagFilter, setTagFilter] = useState<string>("all");
     const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
@@ -446,7 +449,7 @@ const CanvasHistoryTab = memo(function CanvasHistoryTab({ theme }: { theme: Canv
     const records = useGenerationHistoryStore((state) => state.records);
     const removeRecord = useGenerationHistoryStore((state) => state.removeRecord);
     const clearRecords = useGenerationHistoryStore((state) => state.clearRecords);
-    const addAsset = useAssetStore((state) => state.addAsset);
+    const addAsset = useAccountAction(useAssetStore((state) => state.addAsset));
 
     const saveToAssets = async (record: GenerationHistoryRecord) => {
         const first = record.images[0];

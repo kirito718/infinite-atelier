@@ -145,11 +145,11 @@ if (-not [Version]::TryParse($nodeVersionText, [ref]$nodeVersion)) {
     Stop-WithMessage @("[ERROR] Could not read the installed Node.js version from: $nodeExe")
 }
 
-$supported = (($nodeVersion.Major -eq 20 -and $nodeVersion -ge [Version]"20.19.0") -or $nodeVersion -ge [Version]"22.12.0")
+$supported = ($nodeVersion -ge [Version]"22.12.0")
 if (-not $supported) {
     Stop-WithMessage @(
         "[ERROR] Node.js v$nodeVersion is too old for Infinite Atelier.",
-        "Install Node.js 20.19+ or 22.12+: https://nodejs.org/en/download"
+        "Install Node.js 22.12+ (or a newer LTS release): https://nodejs.org/en/download"
     )
 }
 

@@ -1,0 +1,17 @@
+.git
+.github
+.worktrees
+.superpowers
+**/node_modules
+**/dist
+**/data
+**/.env
+**/.env.*
+**/output
+**/.playwright-cli
+**/*.log
+**/*.tsbuildinfo
+**/.DS_Store
+**/encryption.key
+**/atelier.sqlite*
+backups

@@ -7,6 +7,7 @@ import { ModelPicker } from "@/components/model-picker";
 import { ChannelEditorDrawer } from "@/components/layout/channel-editor-drawer";
 import { exportAppConfig, importAppConfig } from "@/services/config-file";
 import { exportAppBackup, importAppBackup } from "@/services/backup-restore";
+import { flushServerChanges } from "@/services/server-storage";
 import { audioFormatOptions, audioVoiceOptions, normalizeAudioSpeedValue } from "@/lib/audio-generation";
 import {
     createModelChannel,
@@ -53,7 +54,8 @@ export function AppConfigPanel({ showDoneButton = false, initialTab = "channels"
         (Object.keys(nextConfig) as Array<keyof AiConfig>).forEach((key) => updateConfig(key, nextConfig[key]));
     };
 
-    const finishConfig = () => {
+    const finishConfig = async () => {
+        try { await flushServerChanges(); } catch (error) { message.error(error instanceof Error ? error.message : "配置保存失败，请重试。"); return; }
         const ready = config.channels.some((channel) => channel.baseUrl.trim() && channel.apiKey.trim() && channel.models.length);
         setConfigDialogOpen(false);
         if (!ready) return;

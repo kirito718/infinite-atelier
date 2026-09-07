@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { createJSONStorage, persist } from "zustand/middleware";
+import { serverStorage } from "@/services/server-storage";
 import { nanoid } from "nanoid";
 
 import i18n from "@/i18n";
@@ -209,6 +210,8 @@ export const useConfigStore = create<ConfigStore>()(
         }),
         {
             name: CONFIG_STORE_KEY,
+            skipHydration: true,
+            storage: createJSONStorage(() => serverStorage),
             partialize: (state) => ({ config: state.config }),
             merge: (persisted, current) => {
                 const persistedState = (persisted || {}) as Partial<ConfigStore>;

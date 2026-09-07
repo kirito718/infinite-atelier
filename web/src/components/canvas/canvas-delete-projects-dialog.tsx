@@ -1,3 +1,4 @@
+import { useAccountAction } from "@/hooks/use-account-action";
 import { Button, Modal } from "antd";
 import { useTranslation } from "react-i18next";
 
@@ -10,7 +11,7 @@ export function CanvasDeleteProjectsDialog() {
     const ids = useCanvasUiStore((state) => state.deleteProjectIds);
     const setDeleteIds = useCanvasUiStore((state) => state.setDeleteProjectIds);
     const removeSelectedIds = useCanvasUiStore((state) => state.removeSelectedProjectIds);
-    const deleteProjects = useCanvasStore((state) => state.deleteProjects);
+    const deleteProjects = useAccountAction(useCanvasStore((state) => state.deleteProjects));
     const cleanupImages = useAssetStore((state) => state.cleanupImages);
     const confirm = () => {
         deleteProjects(ids);

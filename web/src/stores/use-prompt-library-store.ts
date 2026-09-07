@@ -33,7 +33,7 @@ export const usePromptLibraryStore = create<PromptLibraryStore>()(
                 }),
         }),
         {
-            name: PROMPT_LIBRARY_STORE_KEY,
+            name: PROMPT_LIBRARY_STORE_KEY, skipHydration: true,
             storage: promptLibraryStorage,
             partialize: (state) => ({ builtInCovers: state.builtInCovers }) as StorageValue<PromptLibraryStore>["state"],
         },

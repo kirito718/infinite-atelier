@@ -13,7 +13,7 @@ const target = join(root, "public", "monoform");
 
 if (!existsSync(join(studio, "node_modules"))) {
     console.log("[monoform] installing studio dependencies...");
-    execSync("npm install", { cwd: studio, stdio: "inherit" });
+    execSync("npm ci --include=optional", { cwd: studio, stdio: "inherit" });
 }
 
 console.log("[monoform] building studio...");

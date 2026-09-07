@@ -1,6 +1,8 @@
 import { saveAs } from "file-saver";
 
 import i18n from "@/i18n";
+import { flushServerChanges } from "@/services/server-storage";
+import { assertAccountIdentity, getAccountIdentity } from "@/services/account-client";
 import { useConfigStore, type AiConfig } from "@/stores/use-config-store";
 
 type AppConfigFile = {
@@ -17,6 +19,8 @@ export function exportAppConfig() {
 }
 
 export async function importAppConfig(file: File) {
+    const userId = getAccountIdentity();
+    assertAccountIdentity(userId);
     let data: AppConfigFile;
     try {
         data = JSON.parse(await file.text()) as AppConfigFile;
@@ -24,5 +28,7 @@ export async function importAppConfig(file: File) {
         throw new Error(i18n.t("config.invalidFile"));
     }
     if (data.app !== "infinite-canvas" || data.version !== 1 || !data.config) throw new Error(i18n.t("config.invalidFile"));
+    assertAccountIdentity(userId);
     useConfigStore.setState({ config: data.config });
+    await flushServerChanges();
 }

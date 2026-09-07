@@ -24,7 +24,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
         searchParams.delete("baseurl");
         searchParams.delete("apiKey");
         searchParams.delete("apikey");
-        window.history.replaceState(null, "", `${window.location.pathname}${searchParams.size ? `?${searchParams}` : ""}${window.location.hash}`);
+        window.history.replaceState(window.history.state, "", `${window.location.pathname}${searchParams.size ? `?${searchParams}` : ""}${window.location.hash}`);
         const firstChannel = config.channels[0];
         updateConfig(
             "channels",

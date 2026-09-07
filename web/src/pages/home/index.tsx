@@ -1,3 +1,4 @@
+import { useAccountAction } from "@/hooks/use-account-action";
 import { useState, type CSSProperties } from "react";
 import { ArrowRight, ArrowUpRight, Clock3, Palette, Plus, Sparkles } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -20,7 +21,7 @@ export default function IndexPage() {
     const { i18n, t } = useTranslation();
     const navigate = useNavigate();
     const projects = useCanvasStore((state) => state.projects);
-    const createProject = useCanvasStore((state) => state.createProject);
+    const createProject = useAccountAction(useCanvasStore((state) => state.createProject));
     const [paletteId, setPaletteId] = useState<(typeof homePalettes)[number]["id"]>(() => {
         const saved = window.localStorage.getItem(HOME_PALETTE_KEY);
         return homePalettes.some((palette) => palette.id === saved) ? (saved as (typeof homePalettes)[number]["id"]) : "garnet";

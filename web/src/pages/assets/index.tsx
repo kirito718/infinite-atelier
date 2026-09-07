@@ -1,3 +1,4 @@
+import { useAccountAction, useAccountAsyncAction } from "@/hooks/use-account-action";
 import { Copy, Download, PencilLine, Search, Trash2, Upload } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { App, Button, Card, Drawer, Empty, Form, Image, Input, Modal, Pagination, Select, Space, Tag, Typography } from "antd";
@@ -6,7 +7,7 @@ import { useTranslation } from "react-i18next";
 
 import { useCopyText } from "@/hooks/use-copy-text";
 import { formatBytes, readFileAsDataUrl } from "@/lib/image-utils";
-import { uploadImage } from "@/services/image-storage";
+import { uploadImage as uploadImageApi } from "@/services/image-storage";
 import { cn } from "@/lib/utils";
 import { useAssetStore, type Asset, type AssetKind, type ImageAsset } from "@/stores/use-asset-store";
 import { exportAssets, readAssetPackage } from "./asset-transfer";
@@ -26,6 +27,7 @@ type ImageDraft = ImageAsset["data"] | null;
 const kindOptions = ["all", "text", "image", "video"] as const;
 
 export default function AssetsPage() {
+    const uploadImage = useAccountAsyncAction(uploadImageApi);
     const { message } = App.useApp();
     const { t } = useTranslation();
     const copyText = useCopyText();
@@ -34,9 +36,9 @@ export default function AssetsPage() {
     const imageInputRef = useRef<HTMLInputElement>(null);
     const assetInputRef = useRef<HTMLInputElement>(null);
     const assets = useAssetStore((state) => state.assets);
-    const addAsset = useAssetStore((state) => state.addAsset);
-    const updateAsset = useAssetStore((state) => state.updateAsset);
-    const removeAsset = useAssetStore((state) => state.removeAsset);
+    const addAsset = useAccountAction(useAssetStore((state) => state.addAsset));
+    const updateAsset = useAccountAction(useAssetStore((state) => state.updateAsset));
+    const removeAsset = useAccountAction(useAssetStore((state) => state.removeAsset));
     const [keyword, setKeyword] = useState("");
     const [kindFilter, setKindFilter] = useState<AssetKind | "all">("all");
     const [page, setPage] = useState(1);

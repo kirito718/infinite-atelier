@@ -1,0 +1,23 @@
+services:
+  atelier:
+    build:
+      context: .
+      args:
+        CODEX_CLI_VERSION: ${CODEX_CLI_VERSION:-0.153.4}
+    restart: unless-stopped
+    init: true
+    ports:
+      - "${ATELIER_BIND_ADDRESS:-127.0.0.1}:${ATELIER_PORT:-3000}:3000"
+    environment:
+      ATELIER_DATA_DIR: /data
+      ATELIER_PUBLIC_URL: ${ATELIER_PUBLIC_URL:-}
+      ATELIER_ALLOW_REGISTRATION: ${ATELIER_ALLOW_REGISTRATION:-false}
+      ATELIER_SECURE_COOKIES: ${ATELIER_SECURE_COOKIES:-false}
+      ATELIER_ALLOW_PRIVATE_UPSTREAMS: ${ATELIER_ALLOW_PRIVATE_UPSTREAMS:-false}
+      ATELIER_MAX_UPLOAD_BYTES: ${ATELIER_MAX_UPLOAD_BYTES:-104857600}
+      ATELIER_USER_QUOTA_BYTES: ${ATELIER_USER_QUOTA_BYTES:-2147483648}
+    volumes:
+      - atelier-data:/data
+    stop_grace_period: 30s
+volumes:
+  atelier-data:
