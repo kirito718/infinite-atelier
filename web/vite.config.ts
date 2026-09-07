@@ -166,6 +166,9 @@ function sendComfyUiUnavailable(response: import("node:http").ServerResponse, ca
 
 export default defineConfig({
     base: process.env.VITE_BASE || "/",
+    server: {
+        allowedHosts: ["siyuan.kirito.work"],
+    },
     plugins: [react(), apiProxyPlugin(), codexSubscriptionApiPlugin(), comfyuiApiPlugin()],
     resolve: {
         alias: {
