@@ -105,6 +105,9 @@ export function codexSubscriptionApiPlugin({ createApi = createCodexSubscription
 
 export default defineConfig({
     base: process.env.VITE_BASE || "/",
+    server: {
+        allowedHosts: ["siyuan.kirito.work"],
+    },
     plugins: [react(), apiProxyPlugin(), codexSubscriptionApiPlugin()],
     resolve: {
         alias: {
