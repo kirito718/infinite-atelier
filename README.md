@@ -114,6 +114,87 @@ CODEX_HOME=/var/lib/infinite-atelier/codex npm start
 
 当前远程模式按单用户实例设计，接口本身不提供多用户权限隔离；请将站点放在 VPN、访问控制或反向代理认证之后，不要直接暴露到公网。
 
+## Docker 部署（Codex 订阅）
+
+Docker 镜像会同时包含构建后的 Infinite Atelier、Codex CLI 和订阅生图接口。Compose 服务名为 `atelier`，默认只绑定到本机的 `127.0.0.1:3000`，Codex 登录状态保存在命名卷 `codex-data` 中。
+
+### 本地构建与启动
+
+在仓库根目录执行：
+
+```bash
+docker compose build
+docker compose up -d
+docker compose logs -f atelier
+```
+
+打开 `http://127.0.0.1:3000` 后，在应用配置 → 渠道 → Codex 订阅中点击“连接 ChatGPT”，通过页面完成首次登录。浏览器不需要填写 ChatGPT OAuth token 或 API key；登录凭据由容器内的 Codex CLI 使用 `CODEX_HOME=/data/codex` 管理。
+
+常用生命周期操作：
+
+```bash
+docker compose down       # 停止并移除容器，保留 codex-data
+docker compose up -d      # 使用现有卷重新启动
+docker compose down -v    # 同时删除 codex-data，故意重置登录状态
+```
+
+升级镜像或重新构建时，先执行 `docker compose pull`（使用远程镜像）或 `docker compose build`（从源码构建），再执行 `docker compose up -d`。只要不使用 `down -v`，`codex-data` 会保留 OAuth 状态；升级前也应按需备份该卷。`docker compose down -v` 是不可逆的登录状态重置操作，之后需要再次通过页面连接 ChatGPT。
+
+### 备份与恢复 `codex-data`
+
+`codex-data` 包含 Codex 的 OAuth 敏感状态。备份文件等同于登录凭据：只保存到受控的本地加密存储，限制文件权限，且不要上传到代码仓库、共享网盘或日志系统。
+
+在 `compose.yaml` 所在目录执行以下命令可创建备份；先停止服务以获得一致的卷快照：
+
+```bash
+docker compose stop atelier
+docker compose run --rm --no-deps --entrypoint tar -v "$PWD:/backup" atelier \
+  -czf "/backup/codex-data-backup-$(date +%F).tgz" -C /data/codex .
+docker compose up -d atelier
+```
+
+恢复会覆盖现有 OAuth 状态。确认备份文件路径后，停止服务并执行：
+
+```bash
+docker compose down
+docker compose run --rm --no-deps --entrypoint sh -v "$PWD:/backup" atelier \
+  -c 'find /data/codex -mindepth 1 -maxdepth 1 -exec rm -rf {} + && tar xzf /backup/codex-data-backup-YYYY-MM-DD.tgz -C /data/codex'
+docker compose up -d atelier
+```
+
+将示例中的 `YYYY-MM-DD` 替换为实际备份日期；恢复后请妥善保管该归档，避免任何未授权访问。
+
+Compose 支持以下环境变量：
+
+```bash
+IMAGE_TAG=latest \
+ATELIER_IMAGE=ghcr.io/kirito718/infinite-atelier \
+ATELIER_BIND_ADDRESS=127.0.0.1 \
+docker compose up -d
+```
+
+`IMAGE_TAG` 默认是 `latest`，`ATELIER_IMAGE` 默认是 `ghcr.io/kirito718/infinite-atelier`，`ATELIER_BIND_ADDRESS` 默认是 `127.0.0.1`；端口默认是 `3000`。`PULL_POLICY` 默认是 `build`，因此源码运行会构建本地镜像；已执行 `docker compose pull` 的 GHCR 镜像请用 `PULL_POLICY=never` 启动，避免 Compose 改为本地构建或再次拉取。除非已经配置受保护的 HTTPS 反向代理或 VPN，否则请保持 `ATELIER_BIND_ADDRESS=127.0.0.1`，不要将容器端口直接暴露到公网。该部署按单用户实例设计，不提供多用户账号、权限隔离或租户边界。
+
+### 从 GHCR 使用预构建镜像
+
+不需要本地构建时，可以指定 GitHub Container Registry 镜像并启动：
+
+```bash
+IMAGE_TAG=latest \
+ATELIER_IMAGE=ghcr.io/kirito718/infinite-atelier \
+docker compose pull atelier
+IMAGE_TAG=latest \
+ATELIER_IMAGE=ghcr.io/kirito718/infinite-atelier \
+PULL_POLICY=never \
+docker compose up -d atelier
+```
+
+GHCR 发布的镜像提供 `linux/amd64` 和 `linux/arm64` 多架构变体，Docker 会按主机架构选择对应镜像。版本标签也可以通过 `IMAGE_TAG` 指定；升级时保留 `codex-data`，以继续使用已有登录状态。
+
+GitHub Actions 只负责测试、构建和发布镜像：CI 不执行真实的 ChatGPT OAuth 登录，也不执行真实图片生成。首次登录和生图验证必须在部署后的应用页面中由用户完成。
+
+Docker 运行方式仍受同样的安全边界约束：若需要从其他设备访问，请让 Docker 继续监听回环地址，并在 VPN 或带认证的 HTTPS 反向代理后提供访问；不要把未保护的 HTTP 端口直接发布到公网。
+
 ## 目录
 
 ```text

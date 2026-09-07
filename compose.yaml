@@ -1,0 +1,18 @@
+services:
+  atelier:
+    build:
+      context: .
+      args:
+        CODEX_CLI_VERSION: "${CODEX_CLI_VERSION:-0.153.4}"
+    image: "${ATELIER_IMAGE:-ghcr.io/kirito718/infinite-atelier}:${IMAGE_TAG:-latest}"
+    pull_policy: "${PULL_POLICY:-build}"
+    ports:
+      - "${ATELIER_BIND_ADDRESS:-127.0.0.1}:${ATELIER_PORT:-3000}:3000"
+    environment:
+      CODEX_HOME: /data/codex
+    volumes:
+      - codex-data:/data/codex
+    restart: unless-stopped
+
+volumes:
+  codex-data:
