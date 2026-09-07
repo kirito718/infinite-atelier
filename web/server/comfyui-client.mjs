@@ -1,0 +1,457 @@
+export class ComfyUiClientError extends Error {
+    constructor(code, message, cause) {
+        super(message, cause ? { cause } : undefined);
+        this.name = "ComfyUiClientError";
+        this.code = code;
+    }
+}
+
+export class ComfyUiWebSocketError extends ComfyUiClientError {
+    constructor(code, message, cause) {
+        super(code, message, cause);
+        this.name = "ComfyUiWebSocketError";
+    }
+}
+
+export function createComfyUiClient({ baseUrl, apiPrefix = "", fetchImpl = globalThis.fetch, websocketFactory, websocketEnabled = true, timeoutMs = 120_000 } = {}) {
+    const requestBaseUrl = normalizeBaseUrl(baseUrl);
+    const prefix = normalizeApiPrefix(apiPrefix);
+    const resolvedWebsocketFactory = websocketFactory ?? createDefaultWebSocketFactory;
+    if (typeof fetchImpl !== "function") {
+        throw new ComfyUiClientError("COMFYUI_FETCH_UNAVAILABLE", "A fetch implementation is required");
+    }
+    if (typeof resolvedWebsocketFactory !== "function") {
+        throw new ComfyUiClientError("COMFYUI_WEBSOCKET_UNAVAILABLE", "A WebSocket factory is required");
+    }
+
+    const request = async (path, init = {}) => {
+        let response;
+        const composed = composeRequestSignal(init.signal, timeoutMs);
+        try {
+            response = await fetchImpl(buildHttpUrl(requestBaseUrl, prefix, path), {
+                ...init,
+                signal: composed.signal,
+            });
+        } catch (error) {
+            composed.cleanup();
+            throw new ComfyUiClientError("COMFYUI_UNAVAILABLE", `ComfyUI request failed: ${error instanceof Error ? error.message : String(error)}`, error);
+        }
+        if (!response?.ok) {
+            const message = await responseErrorMessage(response, composed.signal);
+            composed.cleanup();
+            const error = new ComfyUiClientError("COMFYUI_HTTP_ERROR", `ComfyUI request failed with status ${response?.status ?? "unknown"}: ${message}`);
+            error.status = response?.status;
+            throw error;
+        }
+        if (response.status === 204 || response.headers?.get?.("content-length") === "0") {
+            composed.cleanup();
+            return response;
+        }
+        return createManagedResponse(response, composed.signal, composed.cleanup);
+    };
+
+    return {
+        async uploadImage({ bytes, filename, mimeType, subfolder, signal } = {}) {
+            if (!(bytes instanceof Uint8Array) && !(bytes instanceof ArrayBuffer)) {
+                throw new ComfyUiClientError("COMFYUI_UPLOAD_INVALID", "Image bytes must be a Uint8Array or ArrayBuffer");
+            }
+            if (typeof filename !== "string" || !filename) {
+                throw new ComfyUiClientError("COMFYUI_UPLOAD_INVALID", "Image filename is required");
+            }
+            if (typeof mimeType !== "string" || !mimeType.startsWith("image/")) {
+                throw new ComfyUiClientError("COMFYUI_UPLOAD_INVALID", "Image mimeType must be an image type");
+            }
+
+            const form = new FormData();
+            const content = bytes instanceof ArrayBuffer ? bytes : bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+            form.append("image", new Blob([content], { type: mimeType }), filename);
+            form.append("type", "input");
+            if (typeof subfolder === "string" && subfolder) form.append("subfolder", subfolder);
+
+            const response = await request("/upload/image", { method: "POST", body: form, signal });
+            const uploaded = await parseJson(response, "COMFYUI_UPLOAD_FAILED");
+            if (!isRecord(uploaded) || typeof uploaded.name !== "string" || !uploaded.name) {
+                throw new ComfyUiClientError("COMFYUI_UPLOAD_FAILED", "ComfyUI upload response is missing a name");
+            }
+            return {
+                name: uploaded.name,
+                subfolder: typeof uploaded.subfolder === "string" ? uploaded.subfolder : "",
+                type: typeof uploaded.type === "string" ? uploaded.type : "input",
+            };
+        },
+
+        async queuePrompt({ prompt, clientId, promptId } = {}) {
+            if (!isRecord(prompt) || typeof clientId !== "string" || !clientId || typeof promptId !== "string" || !promptId) {
+                throw new ComfyUiClientError("COMFYUI_PROMPT_INVALID", "Prompt, clientId, and promptId are required");
+            }
+            const response = await request("/prompt", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ prompt, client_id: clientId, prompt_id: promptId }),
+            });
+            const queued = await parseJson(response, "COMFYUI_QUEUE_FAILED");
+            if (!isRecord(queued) || typeof queued.prompt_id !== "string") {
+                throw new ComfyUiClientError("COMFYUI_QUEUE_FAILED", "ComfyUI queue response is missing prompt_id");
+            }
+            return {
+                prompt_id: queued.prompt_id,
+                number: typeof queued.number === "number" ? queued.number : undefined,
+                node_errors: isRecord(queued.node_errors) ? queued.node_errors : {},
+            };
+        },
+
+        waitForCompletion: websocketEnabled
+            ? function ({ clientId, promptId, onProgress, signal } = {}) {
+                  if (typeof clientId !== "string" || !clientId || typeof promptId !== "string" || !promptId) {
+                      return Promise.reject(new ComfyUiWebSocketError("COMFYUI_WEBSOCKET_INVALID", "clientId and promptId are required"));
+                  }
+                  return waitForCompletion({
+                      websocketFactory: resolvedWebsocketFactory,
+                      websocketUrl: buildWebSocketUrl(requestBaseUrl, prefix, clientId),
+                      promptId,
+                      onProgress,
+                      signal,
+                      timeoutMs,
+                  });
+              }
+            : undefined,
+
+        async getHistory(promptId, { signal } = {}) {
+            if (typeof promptId !== "string" || !promptId) {
+                throw new ComfyUiClientError("COMFYUI_HISTORY_INVALID", "promptId is required");
+            }
+            const response = await request(`/history/${encodeURIComponent(promptId)}`, { signal });
+            return parseJson(response, "COMFYUI_HISTORY_FAILED");
+        },
+
+        async getOutput(fileRef) {
+            const filename = fileRef?.filename ?? fileRef?.name;
+            if (typeof filename !== "string" || !filename) {
+                throw new ComfyUiClientError("COMFYUI_OUTPUT_INVALID", "Output filename is required");
+            }
+            const params = new URLSearchParams({ filename });
+            if (typeof fileRef?.subfolder === "string" && fileRef.subfolder) params.set("subfolder", fileRef.subfolder);
+            params.set("type", typeof fileRef?.type === "string" ? fileRef.type : "output");
+            const response = await request(`/view?${params.toString()}`, { signal: fileRef?.signal });
+            const mimeType = response.headers.get("content-type")?.split(";", 1)[0] || "application/octet-stream";
+            return { bytes: Buffer.from(await response.arrayBuffer()), mimeType };
+        },
+
+        async interrupt(promptId) {
+            if (typeof promptId !== "string" || !promptId) {
+                throw new ComfyUiClientError("COMFYUI_INTERRUPT_INVALID", "promptId is required");
+            }
+            try {
+                const response = await request(`/jobs/${encodeURIComponent(promptId)}/cancel`, { method: "POST" });
+                if (response.status !== 204) await response.arrayBuffer();
+            } catch (error) {
+                if (error instanceof ComfyUiClientError && [404, 405, 501].includes(error.status)) {
+                    throw new ComfyUiClientError("COMFYUI_TARGETED_CANCEL_UNSUPPORTED", "Configured ComfyUI endpoint does not support job-scoped cancellation", error);
+                }
+                throw error;
+            }
+        },
+    };
+}
+
+export function selectComfyUiOutput(history, { promptId, outputNode } = {}) {
+    if (!isRecord(history) || typeof promptId !== "string" || !promptId || typeof outputNode !== "string" || !outputNode) {
+        throw new ComfyUiClientError("COMFYUI_HISTORY_INVALID", "History, promptId, and outputNode are required");
+    }
+    const promptHistory = history[promptId];
+    if (promptHistory?.status?.status_str === "error") {
+        const interrupted = promptHistory.status.messages?.some((message) => Array.isArray(message) && message[0] === "execution_interrupted");
+        throw new ComfyUiClientError(interrupted ? "CANCELLED" : "COMFYUI_EXECUTION_FAILED", interrupted ? "ComfyUI execution was interrupted" : "ComfyUI execution failed; check the GPU worker logs, available memory and model configuration");
+    }
+    const images = promptHistory?.outputs?.[outputNode]?.images;
+    const image = Array.isArray(images) ? images[0] : undefined;
+    if (!isRecord(image) || typeof image.filename !== "string" || !image.filename) {
+        throw new ComfyUiClientError("COMFYUI_OUTPUT_NOT_FOUND", `No image output found for node ${outputNode}`);
+    }
+    return {
+        filename: image.filename,
+        subfolder: typeof image.subfolder === "string" ? image.subfolder : "",
+        type: typeof image.type === "string" ? image.type : "output",
+    };
+}
+
+function waitForCompletion({ websocketFactory, websocketUrl, promptId, onProgress, signal, timeoutMs }) {
+    return new Promise((resolvePromise, rejectPromise) => {
+        let socket;
+        let settled = false;
+        const cleanups = [];
+        const timeout = setTimeout(() => {
+            settle(new ComfyUiWebSocketError("COMFYUI_WEBSOCKET_TIMEOUT", `ComfyUI prompt ${promptId} timed out`));
+        }, timeoutMs);
+
+        const settle = (error) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timeout);
+            for (const cleanup of cleanups) cleanup();
+            try {
+                socket?.close?.();
+            } catch {
+                // Closing an already closed socket is harmless.
+            }
+            if (error) rejectPromise(error);
+            else resolvePromise();
+        };
+
+        const abort = () => settle(createAbortError());
+        if (signal?.aborted) {
+            abort();
+            return;
+        }
+        if (signal) {
+            signal.addEventListener("abort", abort, { once: true });
+            cleanups.push(() => signal.removeEventListener("abort", abort));
+        }
+
+        try {
+            socket = websocketFactory(websocketUrl);
+        } catch (error) {
+            settle(error instanceof ComfyUiWebSocketError ? error : new ComfyUiWebSocketError("COMFYUI_WEBSOCKET_DISCONNECTED", "Could not connect to ComfyUI WebSocket", error));
+            return;
+        }
+
+        cleanups.push(
+            addSocketListener(socket, "message", (event) => {
+                const message = parseSocketMessage(event);
+                if (!message || message.data?.prompt_id !== promptId) return;
+                if (message.type === "progress" && typeof onProgress === "function") {
+                    const value = Number(message.data.value);
+                    const max = Number(message.data.max);
+                    onProgress({
+                        nodeId: typeof message.data.node === "string" ? message.data.node : undefined,
+                        step: Number.isFinite(value) ? value : undefined,
+                        max: Number.isFinite(max) ? max : undefined,
+                        percent: Number.isFinite(value) && Number.isFinite(max) && max > 0 ? (value / max) * 100 : undefined,
+                    });
+                }
+                if (message.type === "execution_error") settle(new ComfyUiClientError("COMFYUI_EXECUTION_FAILED", "ComfyUI execution failed; check the GPU worker logs, available memory and model configuration"));
+                if (message.type === "execution_interrupted") settle(new ComfyUiClientError("CANCELLED", "ComfyUI execution was interrupted"));
+                if (message.type === "executing" && message.data.node === null) settle();
+            }),
+            addSocketListener(socket, "error", (event) => {
+                settle(new ComfyUiWebSocketError("COMFYUI_WEBSOCKET_DISCONNECTED", "ComfyUI WebSocket error", event));
+            }),
+            addSocketListener(socket, "close", () => {
+                settle(new ComfyUiWebSocketError("COMFYUI_WEBSOCKET_DISCONNECTED", "ComfyUI WebSocket disconnected"));
+            }),
+        );
+    });
+}
+
+function addSocketListener(socket, type, listener) {
+    if (typeof socket?.addEventListener === "function") {
+        socket.addEventListener(type, listener);
+        return () => socket.removeEventListener?.(type, listener);
+    }
+    if (typeof socket?.on === "function") {
+        socket.on(type, listener);
+        return () => socket.off?.(type, listener) || socket.removeListener?.(type, listener);
+    }
+    throw new ComfyUiWebSocketError("COMFYUI_WEBSOCKET_UNSUPPORTED", "WebSocket does not support event listeners");
+}
+
+function createDefaultWebSocketFactory(url) {
+    if (typeof globalThis.WebSocket !== "function") {
+        throw new ComfyUiWebSocketError("COMFYUI_WEBSOCKET_UNAVAILABLE", "A global WebSocket implementation is required; run Atelier with Node.js 22 or provide websocketFactory");
+    }
+    return new globalThis.WebSocket(url);
+}
+
+function parseSocketMessage(event) {
+    const data = event?.data ?? event;
+    try {
+        const json = typeof data === "string" ? data : Buffer.isBuffer(data) ? data.toString("utf8") : new TextDecoder().decode(data);
+        const value = JSON.parse(json);
+        return isRecord(value) && isRecord(value.data) ? value : null;
+    } catch {
+        return null;
+    }
+}
+
+function normalizeBaseUrl(baseUrl) {
+    if (typeof baseUrl !== "string" || !baseUrl) {
+        throw new ComfyUiClientError("COMFYUI_URL_INVALID", "A ComfyUI base URL is required");
+    }
+    let parsed;
+    try {
+        parsed = new URL(baseUrl);
+    } catch (error) {
+        throw new ComfyUiClientError("COMFYUI_URL_INVALID", "ComfyUI base URL must be absolute", error);
+    }
+    if (!new Set(["http:", "https:"]).has(parsed.protocol) || parsed.search || parsed.hash) {
+        throw new ComfyUiClientError("COMFYUI_URL_INVALID", "ComfyUI base URL must use http(s) and contain no query or hash");
+    }
+    return parsed.href.replace(/\/+$/, "");
+}
+
+function normalizeApiPrefix(apiPrefix) {
+    if (typeof apiPrefix !== "string") {
+        throw new ComfyUiClientError("COMFYUI_URL_INVALID", "ComfyUI API prefix must be a string");
+    }
+    const trimmed = apiPrefix.trim().replace(/^\/+|\/+$/g, "");
+    if (!trimmed) return "";
+    if (!/^[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*$/.test(trimmed)) {
+        throw new ComfyUiClientError("COMFYUI_URL_INVALID", "ComfyUI API prefix must be a plain path without traversal or URL controls");
+    }
+    return `/${trimmed}`;
+}
+
+function buildHttpUrl(baseUrl, apiPrefix, path) {
+    return `${baseUrl}${apiPrefix}${path}`;
+}
+
+function buildWebSocketUrl(baseUrl, apiPrefix, clientId) {
+    const url = new URL(buildHttpUrl(baseUrl, apiPrefix, "/ws"));
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+    url.searchParams.set("clientId", clientId);
+    return url.toString();
+}
+
+function composeRequestSignal(callerSignal, timeoutMs) {
+    const hasTimeout = Number.isFinite(timeoutMs) && timeoutMs > 0;
+    if (!callerSignal && !hasTimeout) return { signal: undefined, cleanup() {} };
+    if (!hasTimeout) return { signal: callerSignal, cleanup() {} };
+
+    const timeoutController = new AbortController();
+    const timeout = setTimeout(() => timeoutController.abort(timeoutError()), timeoutMs);
+
+    if (!callerSignal) {
+        const cleanup = () => {
+            clearTimeout(timeout);
+            timeoutController.signal.removeEventListener("abort", cleanup);
+        };
+        if (timeoutController.signal.aborted) cleanup();
+        else timeoutController.signal.addEventListener("abort", cleanup, { once: true });
+        return {
+            signal: timeoutController.signal,
+            cleanup,
+        };
+    }
+
+    if (typeof AbortSignal !== "undefined" && typeof AbortSignal.any === "function") {
+        const signal = AbortSignal.any([callerSignal, timeoutController.signal]);
+        const cleanup = () => {
+            clearTimeout(timeout);
+            signal.removeEventListener("abort", cleanup);
+        };
+        if (signal.aborted) cleanup();
+        else signal.addEventListener("abort", cleanup, { once: true });
+        return {
+            signal,
+            cleanup,
+        };
+    }
+
+    const controller = new AbortController();
+    const abortFromCaller = () => controller.abort(callerSignal.reason);
+    if (callerSignal.aborted) abortFromCaller();
+    else callerSignal.addEventListener("abort", abortFromCaller, { once: true });
+    const abortFromTimeout = () => controller.abort(timeoutController.signal.reason);
+    timeoutController.signal.addEventListener("abort", abortFromTimeout, { once: true });
+    const cleanup = () => {
+        clearTimeout(timeout);
+        callerSignal.removeEventListener("abort", abortFromCaller);
+        timeoutController.signal.removeEventListener("abort", abortFromTimeout);
+        controller.signal.removeEventListener("abort", cleanup);
+    };
+    if (controller.signal.aborted) cleanup();
+    else controller.signal.addEventListener("abort", cleanup, { once: true });
+    return {
+        signal: controller.signal,
+        cleanup,
+    };
+}
+
+function timeoutError() {
+    if (typeof DOMException === "function") return new DOMException("The operation was aborted due to timeout", "TimeoutError");
+    const error = new Error("The operation was aborted due to timeout");
+    error.name = "TimeoutError";
+    return error;
+}
+
+function createManagedResponse(response, signal, cleanup) {
+    let cleaned = false;
+    const finish = () => {
+        if (cleaned) return;
+        cleaned = true;
+        cleanup();
+    };
+    const readers = new Set(["arrayBuffer", "blob", "bytes", "formData", "json", "text"]);
+    return new Proxy(response, {
+        get(target, property) {
+            if (readers.has(property)) return (...args) => readResponseBody(target, property, signal, finish, args);
+            const value = Reflect.get(target, property, target);
+            return typeof value === "function" ? value.bind(target) : value;
+        },
+    });
+}
+
+async function readResponseBody(response, method, signal, cleanup, args = []) {
+    try {
+        return await raceWithAbort(
+            Promise.resolve().then(() => response[method](...args)),
+            signal,
+        );
+    } finally {
+        cleanup();
+    }
+}
+
+function raceWithAbort(operation, signal) {
+    if (!signal) return operation;
+    return new Promise((resolve, reject) => {
+        let settled = false;
+        const operationPromise = Promise.resolve(operation);
+        const finish = (callback, value) => {
+            if (settled) return;
+            settled = true;
+            signal.removeEventListener("abort", abort);
+            callback(value);
+        };
+        const abort = () => finish(reject, signal.reason ?? createAbortError());
+        if (signal.aborted) {
+            operationPromise.then(
+                () => {},
+                () => {},
+            );
+            abort();
+            return;
+        }
+        signal.addEventListener("abort", abort, { once: true });
+        operationPromise.then(
+            (value) => finish(resolve, value),
+            (error) => finish(reject, error),
+        );
+    });
+}
+
+async function parseJson(response, code) {
+    try {
+        return await response.json();
+    } catch (error) {
+        throw new ComfyUiClientError(code, "ComfyUI returned invalid JSON", error);
+    }
+}
+
+async function responseErrorMessage(response, signal) {
+    try {
+        return (await readResponseBody(response, "text", signal, () => {})) || "upstream error";
+    } catch {
+        return "upstream error";
+    }
+}
+
+function createAbortError() {
+    const error = new Error("ComfyUI WebSocket wait was aborted");
+    error.name = "AbortError";
+    return error;
+}
+
+function isRecord(value) {
+    return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}

@@ -43,6 +43,12 @@ jobs:
       - name: Run Codex bridge tests
         run: npm run test:codex --prefix web
 
+      - name: Run MONOFORM control tests
+        run: node --test web/monoform-studio/src/control-passes.test.js
+
+      - name: Validate Compose configuration
+        run: docker compose --profile gpu config --quiet
+
       - name: Run unit tests
         run: npm run test:unit --prefix web
 

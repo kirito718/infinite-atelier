@@ -10,9 +10,42 @@ services:
       - "${ATELIER_BIND_ADDRESS:-127.0.0.1}:${ATELIER_PORT:-3000}:3000"
     environment:
       CODEX_HOME: /data/codex
+      COMFYUI_BASE_URL: "${COMFYUI_BASE_URL:-http://comfyui:8188}"
+      COMFYUI_API_PREFIX: "${COMFYUI_API_PREFIX-/api}"
+      COMFYUI_WS_ENABLED: "${COMFYUI_WS_ENABLED:-true}"
+      COMFYUI_TASK_TTL_MS: "${COMFYUI_TASK_TTL_MS:-3600000}"
+      COMFYUI_REQUEST_TIMEOUT_MS: "${COMFYUI_REQUEST_TIMEOUT_MS:-120000}"
+      COMFYUI_MAX_BYTES: "${COMFYUI_MAX_BYTES:-26214400}"
+      COMFYUI_WORKFLOW_DIR: "${COMFYUI_WORKFLOW_DIR:-/app/server/workflows}"
     volumes:
       - codex-data:/data/codex
     restart: unless-stopped
 
+  # Optional Linux/NVIDIA worker. On a Mac, point Atelier at an existing host or remote GPU instead.
+  comfyui:
+    profiles: [gpu]
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: docker/comfyui/Dockerfile
+      args:
+        COMFYUI_REF: "${COMFYUI_REF:-a99d1f9c14f4594fe1e9d7e17c1997bf104d89fb}"
+    image: infinite-atelier-comfyui:local
+    gpus: all
+    expose:
+      - "8188"
+    volumes:
+      - comfyui-models:/opt/comfyui/models
+      - comfyui-custom-nodes:/opt/comfyui/custom_nodes
+      - comfyui-input:/opt/comfyui/input
+      - comfyui-output:/opt/comfyui/output
+      - comfyui-user:/opt/comfyui/user
+    restart: unless-stopped
+
 volumes:
   codex-data:
+  comfyui-models:
+  comfyui-custom-nodes:
+  comfyui-input:
+  comfyui-output:
+  comfyui-user:

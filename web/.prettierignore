@@ -12,3 +12,8 @@ bun.lock
 *.gif
 *.webp
 *.svg
+
+# Generated embedded assets and local browser-test artifacts
+public/monoform
+.playwright-cli
+output

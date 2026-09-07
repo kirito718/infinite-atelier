@@ -53,6 +53,27 @@ export const JOINT_GROUPS = [...new Set(JOINT_DEFINITIONS.map(joint => joint.gro
   joints: JOINT_DEFINITIONS.filter(joint => joint.group === label),
 }))
 
+// The control-pass renderer deliberately uses a compact OpenPose-compatible
+// subset of the Mixamo skeleton. Keeping it here makes the mapping share the
+// same stable joint IDs as poseForObject(), without coupling pure projection
+// code to Three.js or a loaded GLB.
+export const OPENPOSE_JOINT_MAPPING = Object.freeze([
+  { name: 'nose', jointId: 'mixamorigHead', offset: [0, 0.12, -0.1] },
+  { name: 'neck', jointId: 'mixamorigNeck', offset: [0, 0, 0] },
+  { name: 'rightShoulder', jointId: 'mixamorigRightArm', offset: [0, 0, 0] },
+  { name: 'rightElbow', jointId: 'mixamorigRightForeArm', offset: [0, 0, 0] },
+  { name: 'rightWrist', jointId: 'mixamorigRightHand', offset: [0, 0, 0] },
+  { name: 'leftShoulder', jointId: 'mixamorigLeftArm', offset: [0, 0, 0] },
+  { name: 'leftElbow', jointId: 'mixamorigLeftForeArm', offset: [0, 0, 0] },
+  { name: 'leftWrist', jointId: 'mixamorigLeftHand', offset: [0, 0, 0] },
+  { name: 'rightHip', jointId: 'mixamorigRightUpLeg', offset: [0, 0, 0] },
+  { name: 'rightKnee', jointId: 'mixamorigRightLeg', offset: [0, 0, 0] },
+  { name: 'rightAnkle', jointId: 'mixamorigRightFoot', offset: [0, 0, 0] },
+  { name: 'leftHip', jointId: 'mixamorigLeftUpLeg', offset: [0, 0, 0] },
+  { name: 'leftKnee', jointId: 'mixamorigLeftLeg', offset: [0, 0, 0] },
+  { name: 'leftAnkle', jointId: 'mixamorigLeftFoot', offset: [0, 0, 0] },
+])
+
 // These clips are embedded in the official Three.js X-Bot GLB. No hand-authored
 // Euler poses or skeleton retargeting are involved.
 // The squat presets preserve the user's manually authored offsets on top of the

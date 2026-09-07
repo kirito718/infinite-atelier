@@ -3,7 +3,8 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { ContactShadows, Grid, OrbitControls, TransformControls, useGLTF } from '@react-three/drei'
 import * as THREE from 'three'
 import { clone as skeletonClone } from 'three/examples/jsm/utils/SkeletonUtils.js'
-import { poseForObject, presetDefinition } from './rig.js'
+import { OPENPOSE_JOINT_MAPPING, poseForObject, presetDefinition } from './rig.js'
+import { buildOpenPosePrimitives, captureProjectionSpec, isControlPassSceneReady, isControlRenderMode, projectPoseKeypoints } from './control-passes.js'
 
 const CAMERA_ID = '__shot_camera__'
 const BUILT_IN_MODEL_URL = `${import.meta.env.BASE_URL}models/xbot-animated.glb`
@@ -337,7 +338,7 @@ function MixamoIKHandle({ bone, jointId, selected, modelRoot, onBeginDrag, onDra
   )
 }
 
-function MixamoPersonModel({ bodyType = 'standard', pose = 'idle', poseTime, continuousMotion = false, animationTime = 0, rigRoot, joints, footLock = false, color = '#e8e3d8', selected = false, selectedJoint, onSelectJoint, onRotateJoint, onRotateJoints, showBoneGizmo = false, onSurfacePointerDown, onSurfacePointerMove, onSurfacePointerUp }) {
+function MixamoPersonModel({ bodyType = 'standard', pose = 'idle', poseTime, continuousMotion = false, animationTime = 0, rigRoot, joints, footLock = false, color = '#e8e3d8', selected = false, selectedJoint, onSelectJoint, onRotateJoint, onRotateJoints, onLivePose, showBoneGizmo = false, onSurfacePointerDown, onSurfacePointerMove, onSurfacePointerUp }) {
   const gltf = useGLTF(BUILT_IN_MODEL_URL)
   const orbitControls = useThree(state => state.controls)
   const camera = useThree(state => state.camera)
@@ -420,6 +421,20 @@ function MixamoPersonModel({ bodyType = 'standard', pose = 'idle', poseTime, con
     sampledRotations.current = nextSampled
     scene.updateMatrixWorld(true)
   }, [animationTime, bindTransforms, bones, clips, continuousMotion, mixer, pose, poseTime, rig.joints, scene])
+
+  useLayoutEffect(() => {
+    if (!onLivePose || !modelRoot.current) return
+    modelRoot.current.updateWorldMatrix(true, true)
+    const worldPosition = new THREE.Vector3()
+    const positions = {}
+    for (const { jointId } of OPENPOSE_JOINT_MAPPING) {
+      const bone = bones[jointId]
+      if (!bone) continue
+      bone.getWorldPosition(worldPosition)
+      positions[jointId] = worldPosition.toArray()
+    }
+    onLivePose(positions)
+  }, [animationTime, bones, onLivePose, pose, poseTime, rig.joints])
 
   useLayoutEffect(() => {
     const bodyColor = new THREE.Color(color)
@@ -927,7 +942,7 @@ function shouldKeepCurrentSelection(event, selectedId, selected, transformMode) 
   return event.intersections?.some(intersection => sceneObjectIdFromIntersection(intersection) === selectedId)
 }
 
-function SceneObject({ data, selected, selectedId, activeJoint, transformMode, transformSpace = 'world', snapEnabled = true, groundRequest, onSelect, onUpdate, onJointSelect, animationTime = 0, preview = false }) {
+function SceneObject({ data, selected, selectedId, activeJoint, transformMode, transformSpace = 'world', snapEnabled = true, groundRequest, onSelect, onUpdate, onJointSelect, onLivePose, animationTime = 0, preview = false }) {
   const groupRef = useRef(null)
   const objectRotateDrag = useRef(null)
   const scaleTransformStart = useRef(null)
@@ -1038,6 +1053,7 @@ function SceneObject({ data, selected, selectedId, activeJoint, transformMode, t
           animationTime={stateAnimationTime}
           rigRoot={data.rigRoot}
           joints={data.joints}
+          onLivePose={positions => onLivePose?.(data.id, positions)}
           footLock={data.footLock}
           color={data.color}
           selected={selected}
@@ -1260,16 +1276,19 @@ function EditorScene({ objects, selectedId, activeJoint, onSelect, onJointSelect
   )
 }
 
-function PreviewCameraController({ cameraData, cameraAspect }) {
+function PreviewCameraController({ cameraData, cameraAspect, controlProjection = false }) {
   const { camera, size } = useThree()
   useFrame(() => {
     camera.position.fromArray(cameraData.position)
     camera.rotation.set(...cameraData.rotation, 'XYZ')
-    const fov = THREE.MathUtils.radToDeg(2 * Math.atan(24 / (2 * cameraData.focalLength)))
-    const nextAspect = Number.isFinite(cameraAspect) && cameraAspect > 0 ? cameraAspect : size.width / Math.max(1, size.height)
+    const projection = controlProjection ? captureProjectionSpec(cameraData, cameraAspect) : null
+    const fov = projection?.verticalFovDegrees || THREE.MathUtils.radToDeg(2 * Math.atan(24 / (2 * cameraData.focalLength)))
+    const nextAspect = projection?.aspect || (Number.isFinite(cameraAspect) && cameraAspect > 0 ? cameraAspect : size.width / Math.max(1, size.height))
     if (Math.abs(camera.fov - fov) > 0.01 || Math.abs(camera.aspect - nextAspect) > 0.0001) {
       camera.fov = fov
       camera.aspect = nextAspect
+      camera.near = projection?.near || (Number.isFinite(cameraData.near) ? cameraData.near : 0.05)
+      camera.far = projection?.far || (Number.isFinite(cameraData.far) ? cameraData.far : 200)
       camera.updateProjectionMatrix()
     }
   })
@@ -1303,6 +1322,105 @@ function PreviewScene({ objects, cameraData, cameraAspect, lighting, backgroundC
   )
 }
 
+function createPoseCanvas({ objects, cameraData, width, height, liveJointPositions }) {
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.max(1, Math.round(width))
+  canvas.height = Math.max(1, Math.round(height))
+  const context = canvas.getContext('2d')
+  if (!context) return canvas
+
+  context.fillStyle = '#000000'
+  context.fillRect(0, 0, canvas.width, canvas.height)
+  context.lineCap = 'round'
+  context.lineJoin = 'round'
+
+  objects.filter(object => object.type === 'person' && object.visible !== false).forEach(object => {
+    const points = projectPoseKeypoints({
+      object,
+      camera: cameraData,
+      width: canvas.width,
+      height: canvas.height,
+      worldJointPositions: liveJointPositions?.[object.id],
+    })
+    const { limbs, joints } = buildOpenPosePrimitives(points)
+    context.lineWidth = Math.max(2, Math.round(Math.min(canvas.width, canvas.height) * 0.008))
+    context.globalAlpha = 0.6
+    for (const { from, to, color } of limbs) {
+      context.strokeStyle = color
+      context.beginPath()
+      context.moveTo(from.x, from.y)
+      context.lineTo(to.x, to.y)
+      context.stroke()
+    }
+    context.globalAlpha = 1
+    for (const { point, color } of joints) {
+      context.fillStyle = color
+      context.beginPath()
+      context.arc(point.x, point.y, Math.max(3, Math.round(context.lineWidth)), 0, Math.PI * 2)
+      context.fill()
+    }
+  })
+  return canvas
+}
+
+function PoseLiveRigSampler({ objects, animationTime, onLivePose }) {
+  return (
+    <group visible={false}>
+      {objects.filter(object => object.type === 'person').map(object => (
+        <SceneObject key={object.id} data={object} animationTime={animationTime} preview onLivePose={onLivePose} />
+      ))}
+    </group>
+  )
+}
+
+function PosePreviewScene({ objects, cameraData, width, height, animationTime, liveJointPositions, onLivePose }) {
+  const poseCanvas = useMemo(
+    () => createPoseCanvas({ objects, cameraData, width, height, liveJointPositions }),
+    [cameraData, height, liveJointPositions, objects, width],
+  )
+  return <><CanvasBackground canvas={poseCanvas} /><PoseLiveRigSampler objects={objects} animationTime={animationTime} onLivePose={onLivePose} /></>
+}
+
+function LinearDepthMaterial({ near, far }) {
+  const { scene } = useThree()
+  const material = useMemo(() => {
+    const next = new THREE.MeshDepthMaterial({ depthPacking: THREE.BasicDepthPacking })
+    next.onBeforeCompile = shader => {
+      shader.uniforms.controlNear = { value: near }
+      shader.uniforms.controlFar = { value: far }
+      // JS uniform entries do not declare GLSL variables. Declare both before
+      // patching Three's depth fragment, otherwise WebGL silently renders a blank pass.
+      shader.fragmentShader = `uniform float controlNear;\nuniform float controlFar;\n${shader.fragmentShader}`.replace(
+        'gl_FragColor = vec4( vec3( 1.0 - fragCoordZ ), opacity );',
+        'float controlViewZ = perspectiveDepthToViewZ(fragCoordZ, controlNear, controlFar); float controlDepth = clamp((-controlViewZ - controlNear) / max(0.0001, controlFar - controlNear), 0.0, 1.0); gl_FragColor = vec4(vec3(1.0 - controlDepth), opacity);',
+      )
+    }
+    next.needsUpdate = true
+    return next
+  }, [far, near])
+  useEffect(() => {
+    const previous = scene.overrideMaterial
+    scene.overrideMaterial = material
+    return () => {
+      scene.overrideMaterial = previous
+      material.dispose()
+    }
+  }, [material, scene])
+  return null
+}
+
+function DepthPreviewScene({ objects, cameraData, cameraAspect, animationTime, onLivePose }) {
+  const projection = captureProjectionSpec(cameraData, cameraAspect)
+  return (
+    <>
+      <color attach="background" args={['#000000']} />
+      <LinearDepthMaterial near={projection.near} far={projection.far} />
+      {objects.map(object => <SceneObject key={object.id} data={object} animationTime={animationTime} preview onLivePose={onLivePose} />)}
+      <PreviewCameraController cameraData={cameraData} cameraAspect={cameraAspect} controlProjection />
+    </>
+  )
+}
+
 export function MainViewport(props) {
   const editorCamera = props.editorCameraData || {}
   const cameraSettings = props.cameraView
@@ -1321,16 +1439,53 @@ export function MainViewport(props) {
   )
 }
 
-export function CameraPreview({ objects, cameraData, cameraAspect, lighting, backgroundCanvas = null, animationTime = 0, onCanvasReady, exportMode = false }) {
+function ControlPassCanvasReporter({ ready, onCanvasReady }) {
+  const readyFrames = useRef(0)
+  const reported = useRef(false)
+  useFrame(({ gl }) => {
+    if (!ready) { readyFrames.current = 0; return }
+    if (reported.current) return
+    // onCreated fires before suspended character rigs/animations are mounted.
+    // Only report after live rig state has reached and rendered in this root.
+    readyFrames.current += 1
+    if (readyFrames.current >= 3) {
+      reported.current = true
+      onCanvasReady?.(gl.domElement)
+    }
+  })
+  return null
+}
+
+export function CameraPreview({ objects, cameraData, cameraAspect, lighting, backgroundCanvas = null, animationTime = 0, onCanvasReady, exportMode = false, renderMode = 'beauty' }) {
+  const mode = isControlRenderMode(renderMode) ? renderMode : 'beauty'
+  const depthProjection = mode === 'depth' ? captureProjectionSpec(cameraData, cameraAspect) : null
+  const poseWidth = Math.max(1, Math.round(cameraAspect >= 1 ? 1280 : 1280 * cameraAspect))
+  const poseHeight = Math.max(1, Math.round(cameraAspect >= 1 ? 1280 / cameraAspect : 1280))
+  const [liveJointPositions, setLiveJointPositions] = useState({})
+  const reportLivePose = useCallback((objectId, positions) => {
+    setLiveJointPositions(current => {
+      const previous = current[objectId]
+      const unchanged = previous && Object.keys(positions).every(jointId => previous[jointId]?.every((value, index) => Math.abs(value - positions[jointId][index]) < 0.0001))
+      return unchanged ? current : { ...current, [objectId]: positions }
+    })
+  }, [])
   return (
     <Canvas
       shadows="basic"
       dpr={exportMode ? 1 : [1, 1.5]}
-      camera={{ position: cameraData.position, fov: 40, aspect: cameraAspect, near: 0.05, far: 200 }}
-      gl={{ antialias: true, preserveDrawingBuffer: exportMode || Boolean(onCanvasReady), toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 0.9 }}
-      onCreated={({ gl }) => onCanvasReady?.(gl.domElement)}
+      camera={mode === 'pose'
+        ? { position: [0, 0, 1], near: 0, far: 2 }
+        : { position: cameraData.position, fov: depthProjection?.verticalFovDegrees || 40, aspect: depthProjection?.aspect || cameraAspect, near: depthProjection?.near || cameraData.near || 0.05, far: depthProjection?.far || cameraData.far || 200 }}
+      orthographic={mode === 'pose'}
+      gl={{ alpha: mode !== 'pose', antialias: true, preserveDrawingBuffer: exportMode || Boolean(onCanvasReady), toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 0.9 }}
+      onCreated={({ gl }) => { if (mode === 'beauty') onCanvasReady?.(gl.domElement) }}
     >
-      <PreviewScene objects={objects} cameraData={cameraData} cameraAspect={cameraAspect} lighting={lighting} backgroundCanvas={backgroundCanvas} animationTime={animationTime} />
+      {mode === 'pose'
+        ? <PosePreviewScene objects={objects} cameraData={cameraData} width={poseWidth} height={poseHeight} animationTime={animationTime} liveJointPositions={liveJointPositions} onLivePose={reportLivePose} />
+        : mode === 'depth'
+          ? <DepthPreviewScene objects={objects} cameraData={cameraData} cameraAspect={cameraAspect} animationTime={animationTime} onLivePose={reportLivePose} />
+          : <PreviewScene objects={objects} cameraData={cameraData} cameraAspect={cameraAspect} lighting={lighting} backgroundCanvas={backgroundCanvas} animationTime={animationTime} />}
+      {mode !== 'beauty' && <ControlPassCanvasReporter ready={isControlPassSceneReady(objects, liveJointPositions)} onCanvasReady={onCanvasReady} />}
     </Canvas>
   )
 }
