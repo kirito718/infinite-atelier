@@ -59,7 +59,13 @@
         "vitest": "^5.0.0"
     },
     "optionalDependencies": {
+        "@esbuild/linux-arm64": "^0.28.1",
+        "@esbuild/linux-x64": "^0.28.1",
         "@rollup/rollup-linux-arm64-gnu": "^4.62.2",
-        "@rollup/rollup-linux-x64-gnu": "^4.62.2"
+        "@rollup/rollup-linux-x64-gnu": "^4.62.2",
+        "@tailwindcss/oxide-linux-arm64-gnu": "^4.2.4",
+        "@tailwindcss/oxide-linux-x64-gnu": "^4.2.4",
+        "lightningcss-linux-arm64-gnu": "^1.32.0",
+        "lightningcss-linux-x64-gnu": "^1.32.0"
     }
 }
