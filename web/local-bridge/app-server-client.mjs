@@ -9,10 +9,18 @@ import { redactBridgeError } from "./bridge-utils.mjs";
 import { isLoginId, publicDeviceLogin } from "./device-login.mjs";
 
 const CLIENT_INFO = { name: "Infinite Atelier", version: "1.0.0" };
+// Bound transport initialization and account operations, never long-running
+// thread/turn generation requests or the user's device-code authorization wait.
+const AUTH_RPC_METHODS = new Set(["initialize", "account/read", "account/login/start", "account/login/cancel", "account/logout"]);
 
 export class CodexAppServerClient extends EventEmitter {
-    constructor({ command = "codex", args = ["app-server", "--listen", "stdio://"], spawnProcess = (program, programArgs, options) => spawn(program, programArgs, options), generatedImagesDir = defaultGeneratedImagesDir() } = {}) {
+    constructor({ command = "codex", args = ["app-server", "--listen", "stdio://"], spawnProcess = (program, programArgs, options) => spawn(program, programArgs, options), generatedImagesDir = defaultGeneratedImagesDir(), authRpcTimeoutMs = 60_000 } = {}) {
         super();
+        // Node clamps invalid/overflowing timer delays to 1ms; reject them instead.
+        if (!Number.isInteger(authRpcTimeoutMs) || authRpcTimeoutMs < 1 || authRpcTimeoutMs > 2_147_483_647) {
+            throw new RangeError("authRpcTimeoutMs must be an integer between 1 and 2147483647 milliseconds");
+        }
+        this.authRpcTimeoutMs = authRpcTimeoutMs;
         this.command = command;
         this.args = args;
         this.spawnProcess = spawnProcess;
@@ -256,7 +264,8 @@ export class CodexAppServerClient extends EventEmitter {
     }
 
     sendRequest(method, params) {
-        if (!this.child?.stdin?.writable) {
+        const child = this.child;
+        if (!child?.stdin?.writable) {
             return Promise.reject(new Error("Codex app-server is not connected"));
         }
 
@@ -264,12 +273,37 @@ export class CodexAppServerClient extends EventEmitter {
         this.nextId += 1;
         const message = params === undefined ? { method, id } : { method, id, params };
         return new Promise((resolve, reject) => {
-            this.pending.set(id, { resolve, reject });
-            this.child.stdin.write(`${JSON.stringify(message)}\n`, (error) => {
-                if (!error) return;
+            let timer;
+            const settle = (handler) => (value) => {
+                if (timer !== undefined) {
+                    clearTimeout(timer);
+                    timer = undefined;
+                }
+                handler(value);
+            };
+            const pending = { resolve: settle(resolve), reject: settle(reject) };
+            this.pending.set(id, pending);
+            if (AUTH_RPC_METHODS.has(method)) {
+                const timeoutMs = this.authRpcTimeoutMs;
+                timer = setTimeout(() => {
+                    // A completed request or a replacement transport is never
+                    // owned by this deadline, even if its callback was queued.
+                    if (this.child !== child || this.pending.get(id) !== pending) return;
+                    this.handleDisconnect(new Error(`Codex ${method} timed out after ${timeoutMs}ms; reconnect and retry.`));
+                }, timeoutMs);
+            }
+            const fail = (error) => {
+                if (this.pending.get(id) !== pending) return;
                 this.pending.delete(id);
-                reject(bridgeError(error));
-            });
+                pending.reject(bridgeError(error));
+            };
+            try {
+                child.stdin.write(`${JSON.stringify(message)}\n`, (error) => {
+                    if (error) fail(error);
+                });
+            } catch (error) {
+                fail(error);
+            }
         });
     }
 

@@ -228,15 +228,22 @@ test("a start already waiting for logout cannot cross a subsequent close", async
     );
 });
 
-function transport({ read } = {}) {
+function transport({ read, request } = {}) {
     const child = new EventEmitter();
     child.stdin = new PassThrough();
     child.stdout = new PassThrough();
     child.stderr = new PassThrough();
     child.messages = [];
+    child.exitCode = null;
+    child.signalCode = null;
+    child.kills = 0;
+    child.once("exit", (code, signal) => { child.exitCode = code; child.signalCode = signal; });
+    child.reply = (id, result) => child.stdout.write(JSON.stringify({ id, result }) + "\n");
+    child.fail = (id, message) => child.stdout.write(JSON.stringify({ id, error: { code: -32000, message } }) + "\n");
     child.notify = (method, params) => child.stdout.write(JSON.stringify({ method, params }) + "\n");
     child.kill = () => {
-        child.emit("exit", 0, null);
+        child.kills++;
+        child.emit("exit", null, "SIGTERM");
         return true;
     };
     let buffered = "";
@@ -249,7 +256,8 @@ function transport({ read } = {}) {
             child.messages.push(message);
             if (message.id === undefined) continue;
             const result = message.method === "account/login/start" ? LOGIN : message.method === "account/read" ? (read?.() ?? { account: null }) : {};
-            Promise.resolve(result).then((result) => child.stdout.write(JSON.stringify({ id: message.id, result }) + "\n"));
+            if (request) request(message, child, result);
+            else Promise.resolve(result).then((result) => child.reply(message.id, result));
         }
     });
     return child;
@@ -285,3 +293,206 @@ test("buffered notifications from a disconnected process cannot override the rep
     assert.equal(await status, "disconnected");
     assert.equal(client.accountStatus, "disconnected");
 });
+
+
+function observe(promise) {
+    const state = { status: "pending" };
+    promise.then(
+        (value) => Object.assign(state, { status: "fulfilled", value }),
+        (error) => Object.assign(state, { status: "rejected", error }),
+    );
+    return state;
+}
+
+function deadlineFixture(t, blockedMethods, authRpcTimeoutMs) {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const scheduled = t.mock.method(globalThis, "setTimeout");
+    const cleared = t.mock.method(globalThis, "clearTimeout");
+    const oldProcess = transport({ request: (message, child, result) => {
+        if (!blockedMethods.includes(message.method)) child.reply(message.id, result);
+    } });
+    const replacement = transport();
+    const children = [oldProcess, replacement];
+    const client = new CodexAppServerClient({ authRpcTimeoutMs, spawnProcess: () => {
+        const child = children.shift();
+        assert.ok(child, "must not start an unexpected process");
+        return child;
+    } });
+    t.after(() => client.close());
+    const assertTimersCleared = () => {
+        const clearedHandles = new Set(cleared.mock.calls.map((call) => call.arguments[0]));
+        for (const call of scheduled.mock.calls) assert.ok(clearedHandles.has(call.result), "settled RPC timer must be cleared");
+    };
+    return { client, oldProcess, replacement, scheduled, assertTimersCleared };
+}
+
+for (const method of ["initialize", "account/read", "account/login/start", "account/login/cancel", "account/logout"]) {
+    test(`authorization RPC deadline: ${method} rejects, stops its transport and permits retry`, async (t) => {
+        const { client, oldProcess, replacement, assertTimersCleared } = deadlineFixture(t, [method], 100);
+        if (method === "account/login/cancel" || method === "account/logout") await client.login();
+        const operation = method === "account/read" ? client.readAccount()
+            : method === "account/login/cancel" ? client.cancelLogin(LOGIN.loginId)
+            : method === "account/logout" ? client.logout() : client.login();
+        const outcome = observe(operation);
+        await tick();
+        const unanswered = oldProcess.messages.find((message) => message.method === method);
+        assert.ok(unanswered, "must exercise the intended RPC");
+        t.mock.timers.tick(99);
+        await tick();
+        assert.equal(outcome.status, "pending");
+        t.mock.timers.tick(1);
+        await tick();
+        assert.equal(outcome.status, "rejected", "an unanswered auth RPC must not hang forever");
+        assert.match(outcome.error.message, /timed out/);
+        assert.equal(oldProcess.kills, 1);
+        assert.equal(client.child, null);
+        assert.equal(client.pending.size, 0);
+        assert.equal(client.loginPromise, null);
+        assert.equal(client.logoutPromise, null);
+        assertTimersCleared();
+
+        assert.deepEqual(await client.login(), LOGIN);
+        assert.equal(client.child, replacement);
+        oldProcess.reply(unanswered.id, LOGIN);
+        oldProcess.notify("account/updated", { authMode: "chatgpt" });
+        oldProcess.notify("account/login/completed", { loginId: LOGIN.loginId, success: true });
+        await tick();
+        assert.equal(client.accountStatus, "connecting", "late transport messages must not authenticate the retry");
+        t.mock.timers.tick(1000);
+        await tick();
+        assert.equal(replacement.kills, 0);
+        assertTimersCleared();
+        replacement.notify("account/login/completed", { loginId: LOGIN.loginId, success: true });
+        assert.equal(client.accountStatus, "connected");
+    });
+}
+
+test("authorization RPC deadline defaults to exactly 60 seconds", async (t) => {
+    const { client, oldProcess, assertTimersCleared } = deadlineFixture(t, ["initialize"]);
+    const outcome = observe(client.login());
+    await tick();
+    t.mock.timers.tick(59_999);
+    await tick();
+    assert.equal(outcome.status, "pending");
+    assert.equal(oldProcess.kills, 0);
+    t.mock.timers.tick(1);
+    await tick();
+    assert.equal(outcome.status, "rejected");
+    assert.match(outcome.error.message, /60000/);
+    assert.equal(oldProcess.kills, 1);
+    assertTimersCleared();
+});
+
+test("authorization RPC deadline validates timeout configuration before spawning", () => {
+    const spawnProcess = () => assert.fail("configuration validation must not spawn");
+    for (const authRpcTimeoutMs of [null, 0, -1, 0.5, "100", true, NaN, Infinity, -Infinity, 2_147_483_648]) {
+        assert.throws(() => new CodexAppServerClient({ authRpcTimeoutMs, spawnProcess }), /authRpcTimeoutMs/);
+    }
+    for (const authRpcTimeoutMs of [undefined, 1, 60_000, 2_147_483_647]) {
+        assert.doesNotThrow(() => new CodexAppServerClient({ authRpcTimeoutMs, spawnProcess }));
+    }
+});
+
+test("authorization RPC deadline rejects coalesced starts and queued old auth operations before retry", async (t) => {
+    const { client, oldProcess, replacement, assertTimersCleared } = deadlineFixture(t, ["account/login/start", "account/read"], 100);
+    const outcomes = [observe(client.login()), observe(client.login()), observe(client.cancelLogin(LOGIN.loginId)), observe(client.logout()), observe(client.login())];
+    await tick();
+    assert.equal(oldProcess.messages.filter((message) => message.method === "account/login/start").length, 1);
+    t.mock.timers.tick(40);
+    outcomes.push(observe(client.readAccount()));
+    await tick();
+    assert.equal(client.pending.size, 2);
+    t.mock.timers.tick(60);
+    await tick();
+    for (const outcome of outcomes) assert.equal(outcome.status, "rejected", "old authorization callers must all settle");
+    assert.equal(client.pending.size, 0);
+    assertTimersCleared();
+    assert.equal(oldProcess.messages.some((message) => ["account/login/cancel", "account/logout"].includes(message.method)), false);
+    assert.equal(oldProcess.kills, 1);
+    assert.deepEqual(await client.login(), LOGIN);
+    assert.equal(client.child, replacement);
+});
+
+test("authorization RPC deadline releases hung account polling and allows a new connection", async (t) => {
+    const { client, replacement } = deadlineFixture(t, ["account/read"], 100);
+    const polling = observe(client.getAccountStatus());
+    await tick();
+    t.mock.timers.tick(100);
+    await tick();
+    assert.equal(polling.status, "fulfilled");
+    assert.ok(["disconnected", "unavailable"].includes(polling.value));
+    assert.equal(await client.getAccountStatus(), "disconnected");
+    assert.equal(client.child, replacement);
+    assert.deepEqual(await client.login(), LOGIN);
+});
+
+test("authorization RPC deadline does not time-limit thread or turn RPCs", async (t) => {
+    const methods = ["thread/start", "turn/start", "turn/interrupt"];
+    const { client, oldProcess, assertTimersCleared } = deadlineFixture(t, methods, 100);
+    await client.connect();
+    const operations = methods.map((method) => client.sendRequest(method, {}));
+    const outcomes = operations.map(observe);
+    t.mock.timers.tick(120_000);
+    await tick();
+    for (const outcome of outcomes) assert.equal(outcome.status, "pending");
+    assert.equal(oldProcess.kills, 0);
+    assert.equal(client.child, oldProcess);
+    for (const message of oldProcess.messages.filter((message) => methods.includes(message.method))) oldProcess.reply(message.id, {});
+    await Promise.all(operations);
+    assertTimersCleared();
+});
+
+for (const outcome of ["success", "rpc-error", "write-callback-error", "write-throw"]) {
+    test(`authorization RPC deadline clears timers on ${outcome}`, async (t) => {
+        const { client, oldProcess, assertTimersCleared } = deadlineFixture(t, ["account/read"], 100);
+        await client.connect();
+        let write;
+        if (outcome.startsWith("write-")) write = t.mock.method(oldProcess.stdin, "write", (_chunk, callback) => {
+            if (outcome === "write-throw") throw new Error("fixture write failure");
+            callback(new Error("fixture write failure"));
+            return false;
+        });
+        const result = observe(client.readAccount());
+        await tick();
+        if (!write) {
+            const message = oldProcess.messages.find((message) => message.method === "account/read");
+            if (outcome === "success") oldProcess.reply(message.id, { account: null });
+            else oldProcess.fail(message.id, "fixture RPC failure");
+            await tick();
+        }
+        assert.equal(result.status, outcome === "success" ? "fulfilled" : "rejected");
+        assert.equal(client.pending.size, 0);
+        assertTimersCleared();
+        write?.mock.restore();
+        t.mock.timers.tick(1000);
+        await tick();
+        assert.equal(oldProcess.kills, 0, "a settled RPC must not leave a live deadline");
+        assert.deepEqual(await client.login(), LOGIN);
+    });
+}
+
+for (const ending of ["close", "disconnect"]) {
+    test(`authorization RPC deadline clears timers after ${ending}; stale timers cannot stop a replacement`, async (t) => {
+        const { client, oldProcess, replacement, scheduled, assertTimersCleared } = deadlineFixture(t, ["account/read"], 100);
+        await client.connect();
+        const outcomes = [observe(client.readAccount()), observe(client.readAccount())];
+        await tick();
+        const staleCallbacks = scheduled.mock.calls.map((call) => call.arguments[0]);
+        if (ending === "close") await client.close();
+        else oldProcess.emit("error", new Error("fixture transport failure"));
+        await tick();
+        for (const outcome of outcomes) assert.equal(outcome.status, "rejected");
+        assert.equal(client.pending.size, 0);
+        assert.equal(oldProcess.kills, 1);
+        assertTimersCleared();
+        assert.deepEqual(await client.login(), LOGIN);
+        // Also simulate an already-queued callback that escaped timer cancellation.
+        for (const callback of staleCallbacks) callback();
+        t.mock.timers.tick(1000);
+        await tick();
+        assert.equal(client.child, replacement);
+        assert.equal(replacement.kills, 0);
+        assert.equal(client.accountStatus, "connecting");
+        assertTimersCleared();
+    });
+}
