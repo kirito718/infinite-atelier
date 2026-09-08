@@ -32,7 +32,7 @@ export function CodexLoginPanelContent({ state, onCopy, onStart, onCancel, onRef
         <div className="space-y-4 rounded-lg border border-stone-200 p-4 dark:border-stone-800">
             <div>
                 <div className="text-base font-semibold">{t("config.codex.title")}</div>
-                <div className="mt-1 text-sm text-stone-500">{t("config.codex.description")}</div>
+                <div className="mt-1 text-sm text-muted-foreground">{t("config.codex.description")}</div>
             </div>
             <p className="rounded-md bg-stone-100 p-3 text-sm text-stone-600 dark:bg-stone-900 dark:text-stone-300">{t("config.codex.optInHelp")}</p>
             <div className="flex flex-wrap items-center gap-3">
@@ -56,7 +56,7 @@ export function CodexLoginPanelContent({ state, onCopy, onStart, onCancel, onRef
             {login ? (
                 <CodexDeviceCode key={login.loginId} login={login} copyStatus={state.copyStatus} onCopy={onCopy} disabled={busy} />
             ) : state.status === "connecting" && !busy ? (
-                <p className="text-sm text-stone-500">{t("config.codex.pendingHelp")}</p>
+                <p className="text-sm text-muted-foreground">{t("config.codex.pendingHelp")}</p>
             ) : null}
             {state.error ? (
                 <div role="alert" className="space-y-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">
@@ -70,7 +70,7 @@ export function CodexLoginPanelContent({ state, onCopy, onStart, onCancel, onRef
                     ) : null}
                 </div>
             ) : null}
-            <div className="text-xs text-stone-500">{t("config.codex.imageOnly")}</div>
+            <div className="text-xs text-muted-foreground">{t("config.codex.imageOnly")}</div>
         </div>
     );
 }
@@ -80,7 +80,7 @@ function CodexDeviceCode({ login, copyStatus, onCopy, disabled }: { login: Codex
     const codeId = useId();
     return (
         <div className="space-y-3 rounded-md border border-stone-200 p-3 dark:border-stone-700">
-            <p className="text-sm text-stone-500">{t("config.codex.codeHelp")}</p>
+            <p className="text-sm text-muted-foreground">{t("config.codex.codeHelp")}</p>
             <label className="block text-sm font-medium" htmlFor={codeId}>
                 {t("config.codex.codeLabel")}
             </label>
@@ -100,7 +100,7 @@ function CodexDeviceCode({ login, copyStatus, onCopy, disabled }: { login: Codex
                 </Button>
             </div>
             {copyStatus === "failed" ? (
-                <p role="status" className="text-sm text-stone-500">
+                <p role="status" className="text-sm text-muted-foreground">
                     {t("config.codex.copyFailed")}
                 </p>
             ) : null}
@@ -114,7 +114,7 @@ function CodexDeviceCode({ login, copyStatus, onCopy, disabled }: { login: Codex
             <p role="status" className="text-sm text-stone-600 dark:text-stone-300">
                 {t("config.codex.waiting")}
             </p>
-            <p className="text-xs text-stone-500">{t("config.codex.closeHelp")}</p>
+            <p className="text-xs text-muted-foreground">{t("config.codex.closeHelp")}</p>
         </div>
     );
 }

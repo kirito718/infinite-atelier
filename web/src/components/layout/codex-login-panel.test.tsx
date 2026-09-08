@@ -31,6 +31,14 @@ function markup(state: CodexLoginState, language = "en-US") {
 }
 
 describe("Codex device-code login panel", () => {
+    it("uses the shared theme-aware muted token for readable helper text", () => {
+        for (const state of [pending, { ...pending, copyStatus: "failed" as const }, { ...pending, login: null }]) {
+            const html = markup(state);
+            expect(html).toContain("text-muted-foreground");
+            expect(html).not.toContain("text-stone-500");
+        }
+    });
+
     it("shows a selectable code and an explicit, isolated official link without putting the code in its URL", () => {
         const html = markup(pending);
         expect(html).toMatch(/<input[^>]+readonly=""[^>]+value="ABCD-EFGH"/i);
