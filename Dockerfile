@@ -6,7 +6,9 @@ RUN npm ci --legacy-peer-deps --include=optional
 COPY web/monoform-studio/package.json web/monoform-studio/package-lock.json ./monoform-studio/
 RUN npm ci --prefix monoform-studio --include=optional
 COPY web/ ./
-RUN npm run build:all
+# Bound bundler memory without changing the application or runtime heap.
+ARG BUILD_NODE_OPTIONS="--max-old-space-size=2048"
+RUN NODE_OPTIONS="${BUILD_NODE_OPTIONS}" npm run build:all
 
 FROM node:22-bookworm-slim AS runtime
 ARG CODEX_CLI_VERSION=0.153.4

@@ -26,3 +26,22 @@ jobs:
       - run: npm test
       - run: npm run typecheck
       - run: npm run build:all
+
+  container-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # Build and run the real image, recreate containers without dropping their
+      # named volume, and exercise auth/storage/Codex status without real OAuth.
+      - run: node web/scripts/verify-container.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: container-acceptance
+          path: web/output/container-acceptance/**
+          if-no-files-found: warn
+          retention-days: 7

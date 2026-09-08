@@ -325,3 +325,27 @@ test("redirects to a different upstream origin never carry provider credentials"
         }
     }
 });
+
+test("HTTPS public origin issues Secure cookies and still rejects other origins", async () => {
+    const publicUrl = "https://acceptance.example.test";
+    await withApp(
+        async ({ request }) => {
+            const created = await request("/api/account/register", {
+                method: "POST",
+                body: { username: "tlsuser", password: PASSWORD },
+                headers: { origin: publicUrl },
+            });
+            assert.equal(created.status, 201);
+            assert.match(created.headers.get("set-cookie"), /; Secure(?:;|$)/i);
+            assert.match(created.headers.get("set-cookie"), /; HttpOnly/i);
+            const denied = await request("/api/account/login", {
+                method: "POST",
+                body: { username: "tlsuser", password: PASSWORD },
+                headers: { origin: "https://untrusted.example.test", "x-forwarded-proto": "https" },
+            });
+            assert.equal(denied.status, 403);
+            assert.equal((await denied.json()).code, "CSRF");
+        },
+        { publicUrl },
+    );
+});

@@ -174,13 +174,25 @@ Infinite Atelier
 
 代码许可见 [LICENSE](LICENSE)。
 
+
 ## 验证
 
 ```bash
 cd web
-npm test                  # 前端、账号/存储 HTTP、Codex 和导演台存储测试
+npm test                  # 前端、HTTP/Codex、导演台及验收脚本安全测试
 npm run typecheck
 npm run build:all
+npm run test:container    # 需要已启动的 Docker Engine 和 Compose
 ```
 
-测试使用临时目录和模拟上游，不执行真实 ChatGPT OAuth 或生图。
+常规测试使用临时目录和模拟上游。`test:container` 会实际构建并运行镜像，验证非 root 运行、账号和文件隔离、加密、迁移/恢复事务，以及两次容器删除重建后的持久卷与会话恢复。它还会启动真实 Codex App Server 并检查未登录状态，但不登录 ChatGPT、不调用付费生成。
+
+验收使用独立随机 Compose 项目和显式测试环境文件，不读取项目 `.env`，不清理其他容器、网络、卷或镜像。默认结束后清理自己创建的项目，报告保存在 `web/output/container-acceptance/<run>/report.json`，不含凭据。若需保留成功实例做浏览器验收，使用 `npm run test:container -- --keep`；报告提供受所有权校验的清理命令。保留的实例仅绑定回环地址，开放测试注册且上传/账号配额较小，不能作为生产实例。`--image <本地镜像>` 可验证已经构建的镜像；缺少 Docker 不会被当作跳过或成功。
+
+Docker 构建将样式扫描显式限制到应用源码、HTML 和需要的第三方库，避免扫描生成文件或数据目录。构建阶段 V8 堆默认上限为 2 GiB，可通过 `docker compose build --build-arg BUILD_NODE_OPTIONS=...` 调整，不改变运行时进程配置。实测 Linux/arm64 的 4 GiB 引擎可以构建完整镜像。
+
+CI 的 `container-acceptance` job 执行相同验收并保留报告。本地结果不代表已执行远程 CI；远程工作流在推送或 PR 时触发。
+
+容器验收脚本需要 macOS、Linux 或 WSL 的进程组支持，以便在超时/中断后确认子进程已停止再清理测试资源。原生 Windows 用户请在 WSL 中运行这项验收；这不改变应用通过 `start.bat` 本地启动的方式。
+
+`DOCKER_BIN` 应指向 Docker CLI，或使用前台 `exec` 转交 Docker 的包装器。验收只管理自己创建的前台进程组，不是任意主机程序的沙箱；自行 `setsid`/detach 到其他会话的后台包装器不在支持范围。若无法确认受管理进程组已停止，脚本会拒绝清理成功的结论并记录进程证据，需先核查报告再清理资源。
