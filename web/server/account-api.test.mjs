@@ -6,6 +6,7 @@ import { join } from "node:path";
 import test from "node:test";
 import Database from "better-sqlite3";
 import { createAccountApi } from "./account-api.mjs";
+import { verifyPassword } from "./account-auth.mjs";
 
 const PASSWORD = "correct horse battery staple";
 const STATE = "infinite-canvas:canvas_store";
@@ -369,4 +370,48 @@ test("oversized authentication JSON is rejected before credential processing", a
         assert.equal((await result.json()).code, "TOO_LARGE");
         assert.equal((await (await request("/api/account/session")).json()).user, null);
     });
+});
+
+test("an in-flight old-password login cannot issue a session after a password change", async () => {
+    let started, resume;
+    const verifying = new Promise((resolve) => {
+        started = resolve;
+    });
+    const gate = new Promise((resolve) => {
+        resume = resolve;
+    });
+    let delayLogin = true;
+    await withApp(
+        async ({ request, register }) => {
+            const alice = await register("alice");
+            const pendingLogin = request("/api/account/login", { method: "POST", body: { username: "alice", password: PASSWORD } });
+            await verifying;
+            let changed;
+            try {
+                changed = await request("/api/account/password", { ...alice, method: "POST", body: { currentPassword: PASSWORD, newPassword: "replacement correct password" } });
+                assert.equal(changed.status, 200);
+            } finally {
+                resume();
+            }
+            const stale = await pendingLogin;
+            assert.equal(stale.status, 401, "a hash verified before the change must not authorize a new session after it");
+            assert.equal((await stale.json()).code, "INVALID_CREDENTIALS");
+            assert.equal(stale.headers.get("set-cookie"), null);
+            assert.equal((await request(statePath(), alice)).status, 401);
+            const currentCookie = changed.headers.get("set-cookie").split(";")[0];
+            assert.equal((await request(statePath(), { cookie: currentCookie, userId: alice.userId })).status, 200);
+            assert.equal((await request("/api/account/login", { method: "POST", body: { username: "alice", password: "replacement correct password" } })).status, 200);
+        },
+        {
+            verifyLoginPassword: async (password, hash) => {
+                const valid = await verifyPassword(password, hash);
+                if (delayLogin) {
+                    delayLogin = false;
+                    started();
+                    await gate;
+                }
+                return valid;
+            },
+        },
+    );
 });

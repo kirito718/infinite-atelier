@@ -315,14 +315,27 @@ test("an already-aborted signal launches no process", async () => {
     });
 });
 
-test("an unconfirmed POSIX group reports live PIDs and cannot authorize cleanup", { timeout: 10000, skip: process.platform === "win32" }, async () => {
+test("an unconfirmed POSIX group retains observed PIDs across incomplete snapshots and cannot authorize cleanup", { timeout: 10000, skip: process.platform === "win32" }, async () => {
     // Simulate an ineffective GROUP kill in an isolated fixture process: only
     // the launcher dies. /bin/ps and the worker are real. The fixture finally
     // kills its still-owned group so this negative test leaves no live worker.
     const script = `
         import { runProcess, cleanupProject } from ${JSON.stringify(new URL("./verify-container.mjs", import.meta.url).href)};
+        import childProcess from 'node:child_process';
+        import { syncBuiltinESMExports } from 'node:module';
         const originalKill = process.kill.bind(process);
-        let group, failure, calls = 0, blocked = false;
+        const originalExecFile = childProcess.execFile;
+        let group, failure, calls = 0, blocked = false, observed = false, partialSnapshots = 0;
+        // A bounded ps read may omit a still-existing group (observed on macOS).
+        // Keep the first real observation, then deterministically reproduce that gap.
+        childProcess.execFile = (binary, args, options, callback) => originalExecFile(binary, args, options, (error, stdout, stderr) => {
+            if (binary === '/bin/ps' && !error) {
+                if (observed) { partialSnapshots++; callback(null, '', stderr); return; }
+                if (stdout.includes(' ' + group + ' ')) observed = true;
+            }
+            callback(error, stdout, stderr);
+        });
+        syncBuiltinESMExports();
         process.kill = (pid, signal) => {
             if (pid < 0 && signal === 'SIGKILL') { group = -pid; return originalKill(-pid, signal); }
             return originalKill(pid, signal);
@@ -336,12 +349,15 @@ test("an unconfirmed POSIX group reports live PIDs and cannot authorize cleanup"
             catch (error) { blocked = /termination.*unconfirmed/i.test(error.message); }
         } finally {
             process.kill = originalKill;
+            childProcess.execFile = originalExecFile;
+            syncBuiltinESMExports();
             if (group) try { originalKill(-group, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
         }
-        console.log(JSON.stringify({ termination: failure?.termination, worker: Number(failure?.diagnostic.trim()), calls, blocked }));
+        console.log(JSON.stringify({ termination: failure?.termination, worker: Number(failure?.diagnostic.trim()), calls, blocked, partialSnapshots }));
     `;
     const result = JSON.parse((await runProcess(process.execPath, ["--input-type=module", "-e", script], { timeout: 8500 })).stdout);
     assert.equal(result.termination?.confirmed, false);
+    assert.ok(result.partialSnapshots > 0, "the test must exercise incomplete process-table observations");
     assert.ok(result.termination.livePids?.includes(result.worker), `unconfirmed evidence must identify the actual surviving group member: ${JSON.stringify(result)}`);
     assert.equal(result.termination.closed, true, "launcher exit alone must not count as tree termination");
     assert.equal(result.calls, 0);

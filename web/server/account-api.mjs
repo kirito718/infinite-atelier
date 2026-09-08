@@ -38,6 +38,7 @@ export function createAccountApi({
     allowPrivateUpstreams = process.env.ATELIER_ALLOW_PRIVATE_UPSTREAMS === "true",
     codexFactory = defaultCodexFactory,
     comfyuiFactory = createConfiguredComfyUiApi,
+    verifyLoginPassword = verifyPassword,
 } = {}) {
     dataDir = resolveAccountDataDir(dataDir);
     const storage = openAccountDatabase(dataDir);
@@ -81,10 +82,18 @@ export function createAccountApi({
             })();
         } else {
             user = db.prepare("SELECT * FROM users WHERE username=?").get(username);
-            if (!(await verifyPassword(body.password, user?.password_hash))) throw new HttpError(401, "INVALID_CREDENTIALS", "用户名或密码不正确。");
+            if (!(await verifyLoginPassword(body.password, user?.password_hash))) throw new HttpError(401, "INVALID_CREDENTIALS", "用户名或密码不正确。");
         }
-        revokeCurrent(req);
-        issueSession(db, res, user.id, secureCookies);
+        db.transaction(() => {
+            // Password verification is asynchronous. A concurrent password change
+            // must not be followed by a new session authorized by the old hash.
+            // Recheck the credential and issue the session in one transaction.
+            const current = db.prepare("SELECT * FROM users WHERE id=?").get(user.id);
+            if (!current || current.password_hash !== user.password_hash) throw new HttpError(401, "INVALID_CREDENTIALS", "用户名或密码不正确。");
+            user = current;
+            revokeCurrent(req);
+            issueSession(db, res, user.id, secureCookies);
+        })();
         sendJson(res, pathname.endsWith("/register") ? 201 : 200, { user: publicUser(user) });
         return true;
     }

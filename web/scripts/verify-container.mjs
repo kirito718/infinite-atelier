@@ -172,15 +172,18 @@ async function stopProcessTree(child, isClosed) {
                     }
                 } else if (isClosed()) {
                     const members = await groupMembers(pid, Math.max(1, Math.min(250, Math.ceil(deadline - performance.now()))));
-                    if (members) {
+                    // A bounded ps read can omit a still-existing group. Keep
+                    // the last observed members; an empty sample is not proof
+                    // of exit and must not erase actionable failure evidence.
+                    if (members?.length) {
                         evidence.livePids = [...new Set(members.filter((member) => !member.zombie).map((member) => member.pid))].slice(0, 32);
                         evidence.zombies = members.filter((member) => member.zombie).length;
-                        if (members.length && members.every((member) => member.zombie)) {
+                        if (members.every((member) => member.zombie)) {
                             evidence.confirmed = true;
                             evidence.state = "zombies-only";
                             break;
                         }
-                    } else evidence.checkError = "process-table-unavailable";
+                    } else evidence.checkError = members ? "process-group-not-observed" : "process-table-unavailable";
                 }
             } catch (error) {
                 evidence.checkError = error.code || "group-check-failed";

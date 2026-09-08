@@ -13,6 +13,8 @@ import { JOINT_DEFINITIONS, JOINT_GROUPS, RIG_PRESET_GROUPS, RIG_PRESET_OPTIONS,
 import { controlPassCamera, isCaptureBusy, isV1ControlPassList, resolveControlCaptureSelection, validateControlCaptureResult } from './control-passes.js'
 
 const CAMERA_ID = '__shot_camera__'
+// PostMessage identity only; all persisted data still comes from account storage.
+const EMBED_KEY = new URLSearchParams(window.location.search).get('key') || ''
 const PROJECT_VERSION = 16
 const DEFAULT_PROJECT_SETTINGS = {
   name: '未命名场景',
