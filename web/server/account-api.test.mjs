@@ -349,3 +349,24 @@ test("HTTPS public origin issues Secure cookies and still rejects other origins"
         { publicUrl },
     );
 });
+
+test("authentication throttling cannot be bypassed by changing username case", async () => {
+    await withApp(async ({ request }) => {
+        for (let attempt = 0; attempt < 12; attempt++) {
+            const denied = await request("/api/account/login", { method: "POST", body: { username: "ratelimituser", password: PASSWORD } });
+            assert.equal(denied.status, 401);
+        }
+        const limited = await request("/api/account/login", { method: "POST", body: { username: "RATELIMITUSER", password: PASSWORD } });
+        assert.equal(limited.status, 429);
+        assert.equal((await limited.json()).code, "RATE_LIMITED");
+    });
+});
+
+test("oversized authentication JSON is rejected before credential processing", async () => {
+    await withApp(async ({ request }) => {
+        const result = await request("/api/account/register", { method: "POST", body: { username: "largebody", password: "x".repeat(9000) } });
+        assert.equal(result.status, 413);
+        assert.equal((await result.json()).code, "TOO_LARGE");
+        assert.equal((await (await request("/api/account/session")).json()).user, null);
+    });
+});

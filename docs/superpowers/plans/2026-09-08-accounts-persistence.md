@@ -81,11 +81,11 @@
 **Files:** `README.md`, `web/.env.example`, root `Dockerfile`, `compose.yaml`, `.dockerignore`, scripts/package settings if required.
 
 - [x] Document registration configuration, HTTPS/Secure Cookie, persisted key/database/uploads/Codex, migration and consistent stopped-service backup/recovery.
-- [ ] Build/run the Node image: Dockerfile and Compose are implemented, but this environment has no Docker executable. Validate on the deployment host before production use; no external deployment performed.
+- [x] Build/run the real Node image and verify persistent volumes: the default container acceptance built the image, passed all eight groups, recreated containers twice, and confirmed ownership-scoped cleanup. No external deployment performed.
 - [x] Run `npm run test:unit`, `npm run test:codex`, `npm run typecheck`, `npm run build:monoform`, `npm run build` and new storage tests.
 - [x] Browser check fresh signup/login, create/reload canvas, migrate data, save MONOFORM, logout/login, second account isolation. Verify server restart against a disposable persisted directory.
 - [x] Review diff and security boundaries; record exact results and any environment-specific checks not performed.
 
 ## Verification handoff
 
-See `docs/superpowers/verification/2026-09-08-accounts-persistence.md` for the 242 passing tests, browser/restart checks, review fixes, and the Docker / live-OAuth limitations.
+See `docs/superpowers/verification/2026-09-08-accounts-persistence.md` and `docs/superpowers/verification/2026-09-08-accounts-completion-audit.md` for 271 passing tests, real Docker build/recreation/cleanup, browser backup recovery, and the original no-live-OAuth/no-remote-deployment scope.
