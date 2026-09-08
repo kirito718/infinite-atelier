@@ -73,6 +73,17 @@ export function verifyCompose(c, project) {
         "Unexpected Compose test environment",
     );
 }
+export function verifyContainerEnvironment(actual, expected) {
+    check(
+        JSON.stringify(actual.filter((value) => /^(ATELIER_|COMFYUI_)/.test(value)).sort()) ===
+            JSON.stringify(
+                Object.entries(expected)
+                    .map(([key, value]) => `${key}=${value}`)
+                    .sort(),
+            ),
+        "Unexpected effective Atelier environment",
+    );
+}
 export function verifyResource(item, kind, project) {
     const labels = kind === "container" ? item.Config?.Labels : item.Labels;
     check(labels?.[LABEL + "project"] === project, "Refusing resource without exact project ownership");
@@ -495,15 +506,7 @@ async function main(options) {
         container = owned.container[0];
         report.containers.push(identity(container));
         check(container.State.Running, "Container is not running");
-        check(
-            JSON.stringify(container.Config.Env.filter((value) => value.startsWith("ATELIER_")).sort()) ===
-                JSON.stringify(
-                    Object.entries(configuration.services.atelier.environment)
-                        .map(([key, value]) => `${key}=${value}`)
-                        .sort(),
-                ),
-            "Unexpected effective Atelier environment",
-        );
+        verifyContainerEnvironment(container.Config.Env, configuration.services.atelier.environment);
         check(container.Mounts.length === 1 && container.Mounts[0].Type === "volume" && container.Mounts[0].Name === `${project}_atelier-data` && container.Mounts[0].Destination === "/data" && container.Mounts[0].RW, "Unexpected container mounts");
         check(Object.keys(container.NetworkSettings.Networks).join() === `${project}_default`, "Unexpected container network");
         const binding = container.NetworkSettings.Ports["3000/tcp"];

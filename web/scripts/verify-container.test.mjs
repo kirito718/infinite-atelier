@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import test from "node:test";
-import { cleanupProject, composeArgs, gatedFetch, parseOptions, runProcess, safeDiagnostic, testEnvironment, verifyCompose, verifyResource } from "./verify-container.mjs";
+import { cleanupProject, composeArgs, gatedFetch, parseOptions, runProcess, safeDiagnostic, testEnvironment, verifyCompose, verifyContainerEnvironment, verifyResource } from "./verify-container.mjs";
 
 const project = "atelier-acceptance-unit-0123456789abcdef";
 const paths = { root: "/project with spaces", project, envFile: "/test dir/acceptance.env" };
@@ -514,5 +514,24 @@ test("volume-only cleanup never calls Compose down on unidentified containers/ne
     assert.deepEqual(
         calls.filter((args) => args[1] === "rm"),
         [["volume", "rm", `${project}_atelier-data`]],
+    );
+});
+
+test("effective container environment verifies both account and ComfyUI settings without inheriting extras", () => {
+    const expected = fixture().services.atelier.environment;
+    const actual = ["PATH=/usr/local/bin:/usr/bin", "NODE_ENV=production", ...Object.entries(expected).map(([key, value]) => `${key}=${value}`)];
+    assert.doesNotThrow(() => verifyContainerEnvironment(actual, expected));
+    assert.throws(() =>
+        verifyContainerEnvironment(
+            actual.filter((value) => !value.startsWith("COMFYUI_BASE_URL=")),
+            expected,
+        ),
+    );
+    assert.throws(() => verifyContainerEnvironment([...actual, "COMFYUI_EXTRA=unreviewed"], expected));
+    assert.throws(() =>
+        verifyContainerEnvironment(
+            actual.map((value) => (value.startsWith("COMFYUI_BASE_URL=") ? "COMFYUI_BASE_URL=https://production-gpu.example" : value)),
+            expected,
+        ),
     );
 });
