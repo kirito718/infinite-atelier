@@ -6,16 +6,12 @@ import { basename, extname, isAbsolute, join, relative, resolve } from "node:pat
 import { createInterface } from "node:readline";
 
 import { redactBridgeError } from "./bridge-utils.mjs";
+import { isLoginId, publicDeviceLogin } from "./device-login.mjs";
 
 const CLIENT_INFO = { name: "Infinite Atelier", version: "1.0.0" };
 
 export class CodexAppServerClient extends EventEmitter {
-    constructor({
-        command = "codex",
-        args = ["app-server", "--listen", "stdio://"],
-        spawnProcess = (program, programArgs, options) => spawn(program, programArgs, options),
-        generatedImagesDir = defaultGeneratedImagesDir(),
-    } = {}) {
+    constructor({ command = "codex", args = ["app-server", "--listen", "stdio://"], spawnProcess = (program, programArgs, options) => spawn(program, programArgs, options), generatedImagesDir = defaultGeneratedImagesDir() } = {}) {
         super();
         this.command = command;
         this.args = args;
@@ -30,6 +26,12 @@ export class CodexAppServerClient extends EventEmitter {
         this.child = null;
         this.lines = null;
         this.connectPromise = null;
+        this.authEpoch = 0;
+        this.lifecycleEpoch = 0;
+        this.authQueue = Promise.resolve();
+        this.loginAttempt = null;
+        this.loginPromise = null;
+        this.logoutPromise = null;
     }
 
     async connect() {
@@ -51,12 +53,15 @@ export class CodexAppServerClient extends EventEmitter {
 
     async readAccount() {
         await this.connect();
+        const epoch = this.authEpoch;
         const account = await this.sendRequest("account/read", { refreshToken: false });
-        this.accountStatus = account?.account ? "connected" : "disconnected";
+        if (epoch === this.authEpoch) this.accountStatus = this.loginAttempt || this.loginPromise ? "connecting" : account?.account ? "connected" : "disconnected";
         return account;
     }
 
     async getAccountStatus() {
+        if (this.loginAttempt || this.loginPromise) return "connecting";
+        const epoch = this.authEpoch;
         if (this.status !== "connected") {
             try {
                 await this.connect();
@@ -67,27 +72,117 @@ export class CodexAppServerClient extends EventEmitter {
         try {
             await this.readAccount();
         } catch {
-            this.accountStatus = "disconnected";
+            if (epoch === this.authEpoch) this.accountStatus = this.status === "unavailable" ? "unavailable" : "disconnected";
         }
         return this.accountStatus;
     }
 
-    async login() {
-        await this.connect();
-        const result = await this.sendRequest("account/login/start", {
-            type: "chatgpt",
-            useHostedLoginSuccessPage: true,
-            appBrand: "codex",
+    enqueueAuth(operation) {
+        const lifecycle = this.lifecycleEpoch;
+        const check = () => {
+            if (lifecycle !== this.lifecycleEpoch) throw new Error("Codex 登录连接已关闭，请重新连接。");
+        };
+        const queued = this.authQueue.then(() => {
+            check();
+            return operation(check);
         });
-        if (result?.type !== "chatgpt" || typeof result.authUrl !== "string" || result.authUrl.length === 0) {
-            throw new Error("Codex did not return a ChatGPT login URL");
+        this.authQueue = queued.catch(() => {});
+        return queued;
+    }
+
+    async login() {
+        // Capture before any await: an older caller waiting for logout must not
+        // become a brand-new authorization request after close/reconnection.
+        const lifecycle = this.lifecycleEpoch;
+        if (this.logoutPromise) await this.logoutPromise;
+        if (lifecycle !== this.lifecycleEpoch) throw new Error("Codex 登录连接已关闭，请重新连接。");
+        if (this.loginPromise) return this.loginPromise;
+        if (this.loginAttempt?.result) return { ...this.loginAttempt.result };
+        const promise = this.enqueueAuth(async (check) => {
+            const attempt = { loginId: null, result: null, completions: new Map() };
+            this.loginAttempt = attempt;
+            this.authEpoch++;
+            this.accountStatus = "connecting";
+            let result;
+            try {
+                await this.connect();
+                check();
+                result = await this.sendRequest("account/login/start", { type: "chatgptDeviceCode" });
+                check();
+                const login = publicDeviceLogin(result);
+                attempt.loginId = login.loginId;
+                attempt.result = login;
+                const early = attempt.completions.get(login.loginId);
+                attempt.completions.clear();
+                if (early) this.finishLogin(attempt, early.success === true);
+                return { ...login };
+            } catch (error) {
+                // A malformed/legacy response must not leave an invisible login
+                // alive; never send an old cancellation into a replacement process.
+                if (this.loginAttempt === attempt && isLoginId(result?.loginId) && this.status === "connected") {
+                    await this.sendRequest("account/login/cancel", { loginId: result.loginId }).catch(() => {});
+                }
+                this.finishLogin(attempt, false);
+                throw error;
+            }
+        });
+        this.loginPromise = promise;
+        try {
+            return await promise;
+        } finally {
+            if (this.loginPromise === promise) this.loginPromise = null;
         }
-        return { authUrl: result.authUrl };
+    }
+
+    finishLogin(attempt, success) {
+        if (this.loginAttempt !== attempt) return;
+        attempt.result = null;
+        attempt.completions.clear();
+        this.loginAttempt = null;
+        this.authEpoch++;
+        this.accountStatus = success ? "connected" : "disconnected";
+    }
+
+    async cancelLogin(loginId) {
+        return this.enqueueAuth(async (check) => {
+            const attempt = this.loginAttempt;
+            if (!attempt || attempt.loginId !== loginId) return;
+            await this.sendRequest("account/login/cancel", { loginId });
+            check();
+            this.finishLogin(attempt, false);
+        });
     }
 
     async logout() {
-        await this.connect();
-        await this.sendRequest("account/logout");
+        if (this.logoutPromise) return this.logoutPromise;
+        const promise = this.enqueueAuth(async (check) => {
+            await this.connect();
+            check();
+            const attempt = this.loginAttempt;
+            if (attempt?.loginId) {
+                await this.sendRequest("account/login/cancel", { loginId: attempt.loginId });
+                check();
+                this.finishLogin(attempt, false);
+            }
+            await this.sendRequest("account/logout");
+            check();
+            this.authEpoch++;
+            this.accountStatus = "disconnected";
+        });
+        this.logoutPromise = promise;
+        try {
+            await promise;
+        } finally {
+            if (this.logoutPromise === promise) this.logoutPromise = null;
+        }
+    }
+
+    invalidateAuth() {
+        if (this.loginAttempt) this.finishLogin(this.loginAttempt, false);
+        this.lifecycleEpoch++;
+        this.authEpoch++;
+        this.loginPromise = null;
+        this.logoutPromise = null;
         this.accountStatus = "disconnected";
     }
 
@@ -124,9 +219,11 @@ export class CodexAppServerClient extends EventEmitter {
         this.lines?.close();
         this.lines = null;
         if (this.child) {
-            this.child.kill();
+            const child = this.child;
             this.child = null;
+            child.kill();
         }
+        this.invalidateAuth();
         this.rejectPending(new Error("Codex app-server connection closed"));
         this.status = "disconnected";
         this.accountStatus = "disconnected";
@@ -137,15 +234,21 @@ export class CodexAppServerClient extends EventEmitter {
             stdio: ["pipe", "pipe", "pipe"],
         });
         this.child = child;
-        this.lines = createInterface({ input: child.stdout });
-        this.lines.on("line", (line) => this.handleLine(line));
+        const lines = createInterface({ input: child.stdout });
+        this.lines = lines;
+        lines.on("line", (line) => {
+            if (this.child === child && this.lines === lines) this.handleLine(line);
+        });
         child.stderr?.on("data", (chunk) => {
+            if (this.child !== child) return;
             const diagnostic = redactBridgeError(chunk.toString().trim());
             if (diagnostic) this.emit("diagnostic", diagnostic);
         });
-        child.once("error", (error) => this.handleDisconnect(error));
+        child.once("error", (error) => {
+            if (this.child === child) this.handleDisconnect(error);
+        });
         child.once("exit", (code, signal) => {
-            this.handleDisconnect(new Error(`Codex app-server exited (${code ?? signal ?? "unknown"})`));
+            if (this.child === child) this.handleDisconnect(new Error(`Codex app-server exited (${code ?? signal ?? "unknown"})`));
         });
 
         await this.sendRequest("initialize", { clientInfo: CLIENT_INFO });
@@ -204,12 +307,22 @@ export class CodexAppServerClient extends EventEmitter {
         this.emit(method, params);
 
         if (method === "account/updated") {
-            this.accountStatus = "connected";
+            if (this.loginAttempt || this.logoutPromise) return;
+            if (params.authMode === null || typeof params.authMode === "string") {
+                this.authEpoch++;
+                this.accountStatus = params.authMode ? "connected" : "disconnected";
+            }
             return;
         }
 
         if (method === "account/login/completed") {
-            this.accountStatus = params.success === true ? "connected" : "disconnected";
+            const attempt = this.loginAttempt;
+            if (!attempt || !isLoginId(params.loginId)) return;
+            if (!attempt.loginId) {
+                // A response and its completion may arrive in one stdout chunk,
+                // before the awaited start response resumes its microtask.
+                if (attempt.completions.size < 16) attempt.completions.set(params.loginId, { success: params.success === true });
+            } else if (params.loginId === attempt.loginId) this.finishLogin(attempt, params.success === true);
             return;
         }
 
@@ -273,6 +386,13 @@ export class CodexAppServerClient extends EventEmitter {
     }
 
     handleDisconnect(error) {
+        const child = this.child;
+        this.child = null;
+        this.lines?.close();
+        this.lines = null;
+        // On an error rather than a normal exit, stop only this owned transport.
+        if (child?.exitCode === null && child?.signalCode === null) child.kill();
+        this.invalidateAuth();
         if (this.status !== "disconnected") this.status = "unavailable";
         this.rejectPending(error);
         for (const turn of this.turns.values()) {
