@@ -364,7 +364,11 @@ test('beforeunload warns for pending and failed saves, but not acknowledged save
   const { browser, cleanup } = watch(t, storage)
   const leave = () => {
     const event = new Event('beforeunload', { cancelable: true })
+    // Node 22's generic Event is getter-only; browsers dispatch BeforeUnloadEvent,
+    // whose legacy returnValue property is writable.
+    Object.defineProperty(event, 'returnValue', { value: undefined, writable: true })
     browser.dispatchEvent(event)
+    assert.equal(event.returnValue, event.defaultPrevented ? '' : undefined)
     return event.defaultPrevented
   }
   assert.equal(leave(), false)
