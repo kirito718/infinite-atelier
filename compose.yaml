@@ -8,17 +8,25 @@ services:
     pull_policy: "${PULL_POLICY:-build}"
     ports:
       - "${ATELIER_BIND_ADDRESS:-127.0.0.1}:${ATELIER_PORT:-3000}:3000"
+    init: true
+    stop_grace_period: 30s
     environment:
-      CODEX_HOME: /data/codex
+      ATELIER_DATA_DIR: /data
+      ATELIER_PUBLIC_URL: "${ATELIER_PUBLIC_URL:-}"
+      ATELIER_ALLOW_REGISTRATION: "${ATELIER_ALLOW_REGISTRATION:-false}"
+      ATELIER_SECURE_COOKIES: "${ATELIER_SECURE_COOKIES:-false}"
+      ATELIER_ALLOW_PRIVATE_UPSTREAMS: "${ATELIER_ALLOW_PRIVATE_UPSTREAMS:-false}"
+      ATELIER_MAX_UPLOAD_BYTES: "${ATELIER_MAX_UPLOAD_BYTES:-104857600}"
+      ATELIER_USER_QUOTA_BYTES: "${ATELIER_USER_QUOTA_BYTES:-2147483648}"
       COMFYUI_BASE_URL: "${COMFYUI_BASE_URL:-http://comfyui:8188}"
       COMFYUI_API_PREFIX: "${COMFYUI_API_PREFIX-/api}"
       COMFYUI_WS_ENABLED: "${COMFYUI_WS_ENABLED:-true}"
       COMFYUI_TASK_TTL_MS: "${COMFYUI_TASK_TTL_MS:-3600000}"
       COMFYUI_REQUEST_TIMEOUT_MS: "${COMFYUI_REQUEST_TIMEOUT_MS:-120000}"
       COMFYUI_MAX_BYTES: "${COMFYUI_MAX_BYTES:-26214400}"
-      COMFYUI_WORKFLOW_DIR: "${COMFYUI_WORKFLOW_DIR:-/app/server/workflows}"
+      COMFYUI_WORKFLOW_DIR: "${COMFYUI_WORKFLOW_DIR:-/app/web/server/workflows}"
     volumes:
-      - codex-data:/data/codex
+      - atelier-data:/data
     restart: unless-stopped
 
   # Optional Linux/NVIDIA worker. On a Mac, point Atelier at an existing host or remote GPU instead.
@@ -43,7 +51,7 @@ services:
     restart: unless-stopped
 
 volumes:
-  codex-data:
+  atelier-data:
   comfyui-models:
   comfyui-custom-nodes:
   comfyui-input:

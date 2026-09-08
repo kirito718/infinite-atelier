@@ -1,7 +1,20 @@
 .git
+.github
 .worktrees
+.superpowers
 **/node_modules
 **/dist
+**/data
+**/.env
+**/.env.*
+**/output
+**/.playwright-cli
+**/*.log
+**/*.tsbuildinfo
+**/.DS_Store
+**/encryption.key
+**/atelier.sqlite*
+backups
 .env*
 !.env.example
 data
@@ -19,7 +32,6 @@ web/.playwright-cli
 .cache
 .DS_Store
 
-.superpowers
 # Rebuilt from source inside the image; never ship local stale hashed bundles.
 web/public/monoform/assets
 web/public/monoform/index.html

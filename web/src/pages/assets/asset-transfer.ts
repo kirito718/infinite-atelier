@@ -1,8 +1,9 @@
 import { saveAs } from "file-saver";
 
-import { createZip, readZip } from "@/lib/zip";
-import { getMediaBlob, setMediaBlob } from "@/services/file-storage";
-import { getImageBlob, setImageBlob } from "@/services/image-storage";
+import { createZip } from "@/lib/zip";
+import { importAccountArchive } from "@/services/account-archive-import";
+import { getMediaBlob } from "@/services/file-storage";
+import { getImageBlob } from "@/services/image-storage";
 import type { Asset } from "@/stores/use-asset-store";
 
 type AssetExportFile = {
@@ -43,19 +44,11 @@ export async function exportAssets(assets: Asset[], filename: string) {
 }
 
 export async function readAssetPackage(file: File) {
-    const zip = await readZip(file);
-    const assetFile = zip.get("assets.json");
-    if (!assetFile) throw new Error("missing assets.json");
-    const data = JSON.parse(await assetFile.text()) as AssetExportFile;
-    await Promise.all(
-        data.files.map(async (item) => {
-            const blob = zip.get(item.path);
-            if (!blob) return;
-            const typedBlob = blob.type ? blob : blob.slice(0, blob.size, item.mimeType);
-            await (item.storageKey.startsWith("image:") ? setImageBlob(item.storageKey, typedBlob) : setMediaBlob(item.storageKey, typedBlob));
-        }),
-    );
-    return data.assets;
+    return importAccountArchive(file, "assets.json", (manifest) => {
+        const data = manifest as AssetExportFile;
+        if (!data || data.app !== "infinite-canvas" || data.version !== 1 || !Array.isArray(data.assets) || !Array.isArray(data.files)) throw new Error("无效的素材文件包。");
+        return { documents: data.assets, files: data.files };
+    });
 }
 
 function safeFileName(value: string) {

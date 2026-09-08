@@ -818,8 +818,8 @@ export default {
     config: {
         title: "配置与用户偏好",
         invalidFile: "配置文件格式不正确",
-        description: "渠道聚合、模型选择、同步与本地存储",
-        modalDescription: "渠道聚合、默认模型、同步与本地存储",
+        description: "渠道聚合、模型选择与按账号隔离的服务器存储",
+        modalDescription: "渠道聚合、默认模型与按账号隔离的服务器存储",
         tabs: {
             channels: "渠道",
             preferences: "偏好设置",
@@ -827,13 +827,13 @@ export default {
         },
         backup: {
             title: "全量备份与恢复",
-            description: "将画布项目、素材、媒体文件与配置打包为一个文件，可随时恢复。数据仅保存在浏览器本地，建议定期备份。",
+            description: "导出当前账号的主应用草稿、服务器媒体及最近保存的导演台数据。业务数据持久化保存在服务器，仍建议定期备份；备份文件可能包含 API Key，请妥善保管。",
             export: "导出备份",
             exported: "备份已导出",
             exportFailed: "备份导出失败",
             import: "恢复备份",
             importTitle: "恢复备份？",
-            importDescription: "恢复会覆盖当前的画布项目、素材与配置，此操作不可撤销。确定继续吗？",
+            importDescription: "恢复会覆盖备份中包含的当前账号数据，不影响其他账号。如需保留当前内容，请先导出备份。确定继续吗？",
             imported: "备份已恢复",
             importFailed: "恢复备份失败",
             invalidFile: "不是有效的备份文件",

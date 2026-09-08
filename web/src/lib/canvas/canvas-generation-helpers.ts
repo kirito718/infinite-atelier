@@ -1,6 +1,7 @@
+import { bindAccountAsyncAction } from "@/services/account-bound-action";
 import { defaultConfig, resolveModelForCapability, type AiConfig } from "@/stores/use-config-store";
 import i18n from "@/i18n";
-import { resolveImageUrl, uploadImage } from "@/services/image-storage";
+import { resolveImageUrl, uploadImage as uploadImageApi } from "@/services/image-storage";
 import { resolveMediaUrl } from "@/services/file-storage";
 import { imageMetadata, referenceUrl } from "@/lib/canvas/canvas-node-factory";
 import type { NodeGenerationInput } from "@/components/canvas/canvas-node-generation";
@@ -43,6 +44,7 @@ export async function resolveMetadataReferences(metadata: CanvasNodeMetadata) {
 }
 
 export async function hydrateCanvasImages(nodes: CanvasNodeData[]) {
+    const uploadImage = bindAccountAsyncAction(uploadImageApi);
     return Promise.all(
         nodes.map(async (node) => {
             const content = node.metadata?.content;
@@ -57,6 +59,7 @@ export async function hydrateCanvasImages(nodes: CanvasNodeData[]) {
 }
 
 export async function hydrateAssistantImages(sessions: CanvasAssistantSession[]) {
+    const uploadImage = bindAccountAsyncAction(uploadImageApi);
     const hydrateItem = async <T extends { dataUrl?: string; storageKey?: string }>(item: T) => {
         if (item.storageKey) return { ...item, dataUrl: await resolveImageUrl(item.storageKey, item.dataUrl) };
         if (item.dataUrl?.startsWith("data:image/")) {

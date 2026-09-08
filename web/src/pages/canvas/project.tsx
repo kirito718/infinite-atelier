@@ -1,3 +1,4 @@
+import { useAccountAction, useAccountAsyncAction } from "@/hooks/use-account-action";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent as ReactChangeEvent, DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
@@ -5,14 +6,14 @@ import { Group, Video } from "lucide-react";
 import { saveAs } from "file-saver";
 import { useTranslation } from "react-i18next";
 
-import { requestEdit, requestGeneration, requestImageQuestion } from "@/services/api/image";
-import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audio";
-import { requestVideoGeneration, storeGeneratedVideo } from "@/services/api/video";
+import { requestEdit, requestGeneration, requestImageQuestion as requestImageQuestionApi } from "@/services/api/image";
+import { requestAudioGeneration as requestAudioGenerationApi, storeGeneratedAudio as storeGeneratedAudioApi } from "@/services/api/audio";
+import { requestVideoGeneration as requestVideoGenerationApi, storeGeneratedVideo as storeGeneratedVideoApi } from "@/services/api/video";
 import { defaultConfig, isCodexSubscriptionModel, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
-import { uploadImage } from "@/services/image-storage";
+import { uploadImage as uploadImageApi } from "@/services/image-storage";
 import { codexImageFileId, createCodexImageTask, downloadCodexImage, waitForCodexImageTask } from "@/services/codex-image";
 import { routeImageGeneration } from "@/services/image-generation-router";
-import { uploadMediaFile } from "@/services/file-storage";
+import { uploadMediaFile as uploadMediaFileApi } from "@/services/file-storage";
 import { nanoid } from "nanoid";
 import { getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
 import { canvasThemes, type CanvasBackgroundMode } from "@/lib/canvas-theme";
@@ -137,7 +138,7 @@ type DirectorGenerationRequest = {
     controller: AbortController;
 };
 
-async function requestCanvasImage(config: AiConfig, prompt: string, references: ReferenceImage[], options?: { signal?: AbortSignal }, mask?: ReferenceImage) {
+async function requestCanvasImageApi(config: AiConfig, prompt: string, references: ReferenceImage[], options?: { signal?: AbortSignal }, mask?: ReferenceImage) {
     if (mask && isCodexSubscriptionModel(config.model)) throw new Error("Codex subscription image editing does not support masks");
     return routeImageGeneration({
         model: config.model,
@@ -179,6 +180,14 @@ export default function CanvasPage() {
 }
 
 function AtelierCanvasPage() {
+    const uploadImage = useAccountAsyncAction(uploadImageApi);
+    const uploadMediaFile = useAccountAsyncAction(uploadMediaFileApi);
+    const storeGeneratedAudio = useAccountAsyncAction(storeGeneratedAudioApi);
+    const storeGeneratedVideo = useAccountAsyncAction(storeGeneratedVideoApi);
+    const requestAudioGeneration = useAccountAsyncAction(requestAudioGenerationApi);
+    const requestVideoGeneration = useAccountAsyncAction(requestVideoGenerationApi);
+    const requestImageQuestion = useAccountAsyncAction(requestImageQuestionApi);
+    const requestCanvasImage = useAccountAsyncAction(requestCanvasImageApi);
     const { message, modal } = App.useApp();
     const { t } = useTranslation();
     const params = useParams<{ id: string }>();
@@ -191,7 +200,6 @@ function AtelierCanvasPage() {
     const historyRef = useRef<{ past: CanvasHistoryEntry[]; future: CanvasHistoryEntry[] }>({ past: [], future: [] });
     const lastHistoryRef = useRef<CanvasHistoryEntry | null>(null);
     const historyCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const viewportSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const applyingHistoryRef = useRef(false);
     const historyPausedRef = useRef(false);
     const didInitialCenterRef = useRef(false);
@@ -215,14 +223,15 @@ function AtelierCanvasPage() {
     const effectiveConfig = useEffectiveConfig();
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
-    const addAsset = useAssetStore((state) => state.addAsset);
+    const addHistoryRecord = useAccountAction(useGenerationHistoryStore((state) => state.addRecord));
+    const addAsset = useAccountAction(useAssetStore((state) => state.addAsset));
     const cleanupAssetImages = useAssetStore((state) => state.cleanupImages);
     const hydrated = useCanvasStore((state) => state.hydrated);
-    const createProject = useCanvasStore((state) => state.createProject);
+    const createProject = useAccountAction(useCanvasStore((state) => state.createProject));
     const openProject = useCanvasStore((state) => state.openProject);
-    const updateProject = useCanvasStore((state) => state.updateProject);
-    const renameProject = useCanvasStore((state) => state.renameProject);
-    const deleteProjects = useCanvasStore((state) => state.deleteProjects);
+    const updateProject = useAccountAction(useCanvasStore((state) => state.updateProject));
+    const renameProject = useAccountAction(useCanvasStore((state) => state.renameProject));
+    const deleteProjects = useAccountAction(useCanvasStore((state) => state.deleteProjects));
     const currentProject = useCanvasStore((state) => state.projects.find((project) => project.id === projectId));
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const [nodes, setNodes] = useState<CanvasNodeData[]>([]);
@@ -252,7 +261,13 @@ function AtelierCanvasPage() {
     const [toolbarNodeId, setToolbarNodeId] = useState<string | null>(null);
     const [nodeImageSettingsOpen, setNodeImageSettingsOpen] = useState(false);
     const [dialogNodeId, setDialogNodeId] = useState<string | null>(null);
-    const directorPanelNode = nodes.find((node) => node.id === dialogNodeId && node.type === CanvasNodeType.Director);
+    const requestedDirectorId = nodes.find((node) => node.id === dialogNodeId && node.type === CanvasNodeType.Director)?.id || null;
+    // Retain the iframe independently of canvas selection/deletion/async actions.
+    // Only the panel's acknowledged close (or confirmed discard) may release it.
+    const [directorPanelNodeId, setDirectorPanelNodeId] = useState<string | null>(null);
+    useEffect(() => {
+        if (!directorPanelNodeId && requestedDirectorId) setDirectorPanelNodeId(requestedDirectorId);
+    }, [directorPanelNodeId, requestedDirectorId]);
     const [infoNodeId, setInfoNodeId] = useState<string | null>(null);
     const [cropNodeId, setCropNodeId] = useState<string | null>(null);
     const [maskEditNodeId, setMaskEditNodeId] = useState<string | null>(null);
@@ -281,6 +296,13 @@ function AtelierCanvasPage() {
     const selectionBoxRef = useRef(selectionBox);
     const pendingConnectionCreateRef = useRef(pendingConnectionCreate);
     const generationRequestsRef = useRef(new Map<string, CanvasGenerationRequest>());
+    useEffect(
+        () => () => {
+            generationRequestsRef.current.forEach(({ controller }) => controller.abort());
+            generationRequestsRef.current.clear();
+        },
+        [],
+    );
     const directorGenerationRef = useRef<DirectorGenerationRequest | null>(null);
     const [directorGenerationStatus, setDirectorGenerationStatus] = useState<DirectorGenerationStatus>({ state: "idle" });
 
@@ -456,15 +478,7 @@ function AtelierCanvasPage() {
     }, [dialogNodeId]);
 
     useEffect(() => {
-        if (!projectLoaded) return;
-        if (viewportSaveTimerRef.current) clearTimeout(viewportSaveTimerRef.current);
-        viewportSaveTimerRef.current = setTimeout(() => {
-            updateProject(projectId, { viewport: viewportRef.current });
-            viewportSaveTimerRef.current = null;
-        }, 500);
-        return () => {
-            if (viewportSaveTimerRef.current) clearTimeout(viewportSaveTimerRef.current);
-        };
+        if (projectLoaded) updateProject(projectId, { viewport });
     }, [projectId, projectLoaded, updateProject, viewport]);
 
     useLayoutEffect(() => {
@@ -1343,6 +1357,9 @@ function AtelierCanvasPage() {
 
     useEffect(() => {
         const handleKeyDown = (event: KeyboardEvent) => {
+            // The modal owns Escape. Canvas Delete/Undo/selection shortcuts must
+            // not detach an active director (including while its close is saving).
+            if (directorPanelNodeId) return;
             const target = event.target instanceof Element ? event.target : null;
             if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement || target?.closest("[contenteditable='true'],[data-canvas-no-zoom],[data-canvas-shortcuts-ignore]"))
                 return;
@@ -1414,7 +1431,7 @@ function AtelierCanvasPage() {
 
         window.addEventListener("keydown", handleKeyDown);
         return () => window.removeEventListener("keydown", handleKeyDown);
-    }, [copySelectedNodes, deleteConnection, deleteNodes, pasteCopiedNodes, pasteSystemClipboard, redoCanvas, selectedConnectionId, setConnecting, undoCanvas]);
+    }, [copySelectedNodes, deleteConnection, deleteNodes, directorPanelNodeId, pasteCopiedNodes, pasteSystemClipboard, redoCanvas, selectedConnectionId, setConnecting, undoCanvas]);
 
     const handleConnectStart = useCallback(
         (event: ReactMouseEvent, nodeId: string, handleType: "source" | "target") => {
@@ -2209,7 +2226,7 @@ function AtelierCanvasPage() {
                     );
                     if (rootId !== nodeId) finishGenerationRequest(rootId, controller);
                     if (succeededImages.length) {
-                        useGenerationHistoryStore.getState().addRecord({
+                        addHistoryRecord({
                             prompt: effectivePrompt,
                             model: generationConfig.model || "",
                             images: succeededImages,
@@ -3065,18 +3082,23 @@ function AtelierCanvasPage() {
                     ) : null}
                 </AtelierCanvas>
 
-                {directorPanelNode ? (
+                {directorPanelNodeId ? (
                     <DirectorPanel
-                        nodeId={directorPanelNode.id}
+                        key={directorPanelNodeId}
+                        nodeId={directorPanelNodeId}
                         open
-                        onClose={() => setDialogNodeId(null)}
-                        onExport={handleDirectorExport(directorPanelNode.id)}
-                        onGenerateComfy={(captureResult) => void handleDirectorComfyGenerate(directorPanelNode.id, captureResult)}
-                        onGenerationCancel={() => handleDirectorGenerationCancel(directorPanelNode.id)}
-                        generationStatus={directorGenerationStatus.directorNodeId === directorPanelNode.id ? directorGenerationStatus : undefined}
-                        busy={Boolean(directorGenerationRef.current && directorGenerationRef.current.directorNodeId !== directorPanelNode.id)}
-                        prompt={directorPanelNode.metadata?.prompt || ""}
-                        onPromptChange={(prompt) => setNodes((prev) => prev.map((node) => (node.id === directorPanelNode.id ? { ...node, metadata: { ...node.metadata, prompt } } : node)))}
+                        closeRequested={requestedDirectorId !== directorPanelNodeId}
+                        onClose={() => {
+                            setDirectorPanelNodeId((current) => (current === directorPanelNodeId ? null : current));
+                            setDialogNodeId((current) => (current === directorPanelNodeId ? null : current));
+                        }}
+                        onExport={handleDirectorExport(directorPanelNodeId)}
+                        onGenerateComfy={(captureResult) => void handleDirectorComfyGenerate(directorPanelNodeId, captureResult)}
+                        onGenerationCancel={() => handleDirectorGenerationCancel(directorPanelNodeId)}
+                        generationStatus={directorGenerationStatus.directorNodeId === directorPanelNodeId ? directorGenerationStatus : undefined}
+                        busy={Boolean(directorGenerationRef.current && directorGenerationRef.current.directorNodeId !== directorPanelNodeId)}
+                        prompt={nodes.find((node) => node.id === directorPanelNodeId)?.metadata?.prompt || ""}
+                        onPromptChange={(prompt) => setNodes((prev) => prev.map((node) => (node.id === directorPanelNodeId ? { ...node, metadata: { ...node.metadata, prompt } } : node)))}
                     />
                 ) : null}
 

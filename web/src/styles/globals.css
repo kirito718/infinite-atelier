@@ -1,7 +1,10 @@
-@import "tailwindcss";
+@import "tailwindcss" source(none);
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
-@source "../../../node_modules/streamdown/dist/*.js";
+/* Keep class detection independent of cwd/.gitignore in native and Docker builds. */
+@source "../";
+@source "../../index.html";
+@source "../../node_modules/streamdown/dist/*.js";
 
 @custom-variant dark (&:is(.dark *));
 

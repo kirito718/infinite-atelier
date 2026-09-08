@@ -1,49 +1,31 @@
-FROM node:22-slim AS build
-
-WORKDIR /app
-
-COPY web/package*.json ./
+FROM node:22-bookworm-slim AS build
+WORKDIR /app/web
+RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ && rm -rf /var/lib/apt/lists/*
+COPY web/package.json web/package-lock.json ./
 RUN npm ci --legacy-peer-deps --include=optional
-
-COPY web/monoform-studio/package*.json ./monoform-studio/
+COPY web/monoform-studio/package.json web/monoform-studio/package-lock.json ./monoform-studio/
 RUN npm ci --prefix monoform-studio --include=optional
+COPY web/ ./
+# Bound bundler memory without changing the application or runtime heap.
+ARG BUILD_NODE_OPTIONS="--max-old-space-size=2048"
+RUN NODE_OPTIONS="${BUILD_NODE_OPTIONS}" npm run build:all
 
-COPY web ./
-RUN npm run build:monoform && npm run build
-
-
-FROM node:22-slim AS runtime
-
+FROM node:22-bookworm-slim AS runtime
 ARG CODEX_CLI_VERSION=0.153.4
-
-WORKDIR /app
-
-COPY --from=build /app/dist ./dist
-COPY --from=build /app/vite.config.ts ./vite.config.ts
-COPY --from=build /app/server ./server
-COPY --from=build /app/local-bridge ./local-bridge
-COPY --from=build /app/package*.json ./
-COPY --from=build /app/node_modules ./node_modules
-
-RUN npm install --global "@openai/codex@${CODEX_CLI_VERSION}" \
-    && codex --version \
-    && npm cache clean --force \
-    && mkdir -p /data/codex \
-    && chown -R node:node /data/codex
-
+RUN npm install --global @openai/codex@${CODEX_CLI_VERSION} && codex --version && npm cache clean --force \
+    && mkdir -p /data /app/web && chown -R node:node /data /app
+WORKDIR /app/web
+COPY --from=build --chown=node:node /app/web/node_modules ./node_modules
+COPY --from=build --chown=node:node /app/web/dist ./dist
+COPY --from=build --chown=node:node /app/web/server ./server
+COPY --from=build --chown=node:node /app/web/local-bridge ./local-bridge
+COPY --from=build --chown=node:node /app/web/vite.config.ts /app/web/package.json /app/web/package-lock.json ./
 COPY docker/entrypoint.sh /usr/local/bin/infinite-atelier-entrypoint
 RUN chmod 755 /usr/local/bin/infinite-atelier-entrypoint
-
-ENV CODEX_HOME=/data/codex
-
-VOLUME ["/data/codex"]
-
-EXPOSE 3000
-
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD ["node", "-e", "fetch('http://127.0.0.1:3000/').then((response) => { if (!response.ok) process.exit(1); }).catch(() => process.exit(1))"]
-
+ENV NODE_ENV=production ATELIER_DATA_DIR=/data ATELIER_ALLOW_REGISTRATION=false
 USER node
-
+VOLUME ["/data"]
+EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s CMD node -e "fetch('http://127.0.0.1:3000/api/account/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 ENTRYPOINT ["/usr/local/bin/infinite-atelier-entrypoint"]
 CMD ["npm", "start"]

@@ -44,6 +44,6 @@ export const useGenerationHistoryStore = create<GenerationHistoryStore>()(
             removeRecord: (id) => set((state) => ({ records: state.records.filter((record) => record.id !== id) })),
             clearRecords: () => set({ records: [] }),
         }),
-        { name: HISTORY_STORE_KEY, storage: historyStorage, partialize: (state) => ({ records: state.records }) },
+        { name: HISTORY_STORE_KEY, skipHydration: true, storage: historyStorage, partialize: (state) => ({ records: state.records }) },
     ),
 );

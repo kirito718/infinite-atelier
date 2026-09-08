@@ -6,13 +6,14 @@
 浏览器：Director → MONOFORM 当前镜头/当前帧 → 1024×1024 Pose + Depth
       → 同源 /api/comfyui/jobs → Atelier 服务端 → 私网 ComfyUI
       ← 任务进度 / 任务专属 PNG ← 工作流输出
-      → IndexedDB 保存 → 导演节点旁的 Image 节点
+      → 所属账号的服务端媒体保存 → 导演节点旁的 Image 节点
 ```
 
 - MONOFORM 负责摆人物、OpenPose 身体骨架图和线性灰度 Depth；两张图使用相同相机和尺寸。
 - 导演台中的提示词随节点保存；生成按钮会锁定重复提交，支持取消、错误说明和重新生成。关闭导演台不丢失正在执行的任务；删除相关节点或离开画布会请求取消。
 - 浏览器只访问 Atelier 的同源路由，不能设置上游地址，也不接收上游凭据。
-- 第一版是**单用户、内存任务队列**；不是多租户 GPU 服务。成功图片保存在当前浏览器 IndexedDB，换浏览器/设备需要导出或备份画布。
+- 所有 `/api/comfyui/*` 经过应用登录认证，创建/取消请求还校验同源和原账号。任务、幂等键、图片输出与取消操作按账号隔离；账号切换会中止原账号的浏览器操作。
+- 任务队列仍为**每账号内存队列**：服务重启会丢失未完成任务，已保存的图片与画布则保存在所属账号的服务器存储，可在其他设备登录访问。当前实例最多驻留 16 个 ComfyUI 用户运行时。共享 GPU 和进程不是对抗性的多租户沙箱，仅向可信账号开放；互不信任的用户需独立实例。
 - Codex 订阅生图仍走已有独立渠道；ComfyUI 仅接入导演台图片生成，不替代视频渠道。
 
 ## 工作流与模型
@@ -68,9 +69,9 @@ docker compose --profile gpu up -d atelier
 
 Atelier → `http://comfyui:8188` 只走 Compose 网络。ComfyUI 没有映射宿主机端口，Atelier 默认仅绑定 `127.0.0.1:3000`。需要远程访问时，请在反向代理上设置 HTTPS 和访问控制后再开放 Atelier；不要直接公开 ComfyUI。
 
-`models`、`custom_nodes`、`input`、`output`、`user` 以及 Codex 的 `CODEX_HOME` 各有持久卷。未来增加 custom nodes 时，应在受控镜像里固定源码提交并安装对应依赖，不要在运行中的服务上安装来源不明的代码。
+`models`、`custom_nodes`、`input`、`output`、`user` 各有 GPU 服务持久卷；Atelier 的账号、媒体、加密密钥和按用户划分的 Codex 凭据统一保存在 `atelier-data` 卷（`/data`）。未来增加 custom nodes 时，应在受控镜像里固定源码提交并安装对应依赖，不要在运行中的服务上安装来源不明的代码。
 
-Codex OAuth 仍由容器内 CLI 管理；不要把本机授权文件写进 Dockerfile、镜像层或仓库。若要保留原有远程 Codex 链路，按已有配置页的登录流程完成容器端登录。
+Codex OAuth 仍由容器内 CLI 管理；不要把本机授权文件写进 Dockerfile、镜像层或仓库。若要保留原有远程 Codex 链路，先登录应用账号，再按配置页的登录流程完成该账号的容器端登录。
 
 ## 已有 GPU 服务 / 远端 GPU
 

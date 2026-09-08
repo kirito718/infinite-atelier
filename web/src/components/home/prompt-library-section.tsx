@@ -1,3 +1,4 @@
+import { useAccountAction } from "@/hooks/use-account-action";
 import { useMemo, useRef, useState } from "react";
 import { App, Button, Input, Modal, Select } from "antd";
 import { BookmarkPlus, Check, Copy, Edit3, ImagePlus, Plus, RotateCcw, Search, Sparkles, UploadCloud, X } from "lucide-react";
@@ -38,11 +39,11 @@ export function PromptLibrarySection() {
     const fileInputRef = useRef<HTMLInputElement>(null);
     const builtInCoverInputRef = useRef<HTMLInputElement>(null);
     const assets = useAssetStore((state) => state.assets);
-    const addAsset = useAssetStore((state) => state.addAsset);
-    const updateAsset = useAssetStore((state) => state.updateAsset);
+    const addAsset = useAccountAction(useAssetStore((state) => state.addAsset));
+    const updateAsset = useAccountAction(useAssetStore((state) => state.updateAsset));
     const builtInCovers = usePromptLibraryStore((state) => state.builtInCovers);
-    const setBuiltInCover = usePromptLibraryStore((state) => state.setBuiltInCover);
-    const removeBuiltInCover = usePromptLibraryStore((state) => state.removeBuiltInCover);
+    const setBuiltInCover = useAccountAction(usePromptLibraryStore((state) => state.setBuiltInCover));
+    const removeBuiltInCover = useAccountAction(usePromptLibraryStore((state) => state.removeBuiltInCover));
     const [category, setCategory] = useState<PromptCategoryId>("all");
     const [query, setQuery] = useState("");
     const [editorOpen, setEditorOpen] = useState(false);

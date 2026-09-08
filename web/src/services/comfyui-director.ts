@@ -1,3 +1,4 @@
+import { AccountApiError, authenticatedFetch, getAccountSignal } from "./account-client";
 import type { ComfyUiJobCreate, ComfyUiJobError, ComfyUiJobStatus } from "@/types/comfyui";
 
 const COMFYUI_API_PATH = "/api/comfyui";
@@ -91,7 +92,10 @@ export function withAbort<T>(operation: () => Promise<T>, signal: AbortSignal): 
         const onAbort = () => reject(signal.reason);
         signal.addEventListener("abort", onAbort, { once: true });
         Promise.resolve()
-            .then(operation)
+            .then(() => {
+                signal.throwIfAborted();
+                return operation();
+            })
             .then(
                 (value) => {
                     signal.removeEventListener("abort", onAbort);
@@ -106,20 +110,27 @@ export function withAbort<T>(operation: () => Promise<T>, signal: AbortSignal): 
 }
 
 async function request<T>(input: string, init: RequestInit, options: ComfyUiRequestOptions, read: (response: Response) => Promise<T>): Promise<T> {
+    const accountSignal = getAccountSignal();
+    const signal = options.signal ? AbortSignal.any([options.signal, accountSignal]) : accountSignal;
     const controller = new AbortController();
-    const onAbort = () => controller.abort(options.signal?.reason);
-    if (options.signal?.aborted) onAbort();
-    else options.signal?.addEventListener("abort", onAbort, { once: true });
+    const onAbort = () => controller.abort(signal.reason);
+    if (signal.aborted) onAbort();
+    else signal.addEventListener("abort", onAbort, { once: true });
     const timer = setTimeout(() => controller.abort(new DOMException("ComfyUI request timed out", "TimeoutError")), options.timeoutMs ?? 60_000);
     try {
         return await withAbort(async () => {
-            const response = await fetch(input, { ...init, signal: controller.signal, headers: { accept: "application/json", ...init.headers } });
+            const response = await authenticatedFetch(input, { ...init, signal: controller.signal, headers: { accept: "application/json", ...init.headers } });
+            controller.signal.throwIfAborted();
             if (!response.ok) {
                 let payload: unknown;
                 try {
                     payload = await response.json();
                 } catch {
                     payload = undefined;
+                }
+                controller.signal.throwIfAborted();
+                if (isRecord(payload) && (payload.code === "ACCOUNT_CHANGED" || payload.code === "UNAUTHENTICATED") && typeof payload.error === "string") {
+                    throw new AccountApiError(response.status, payload.code, payload.error);
                 }
                 const error = normalizeError(payload, response.status);
                 throw new ComfyUiApiError(error.code, error.message, response.status, error.retryable);
@@ -133,11 +144,11 @@ async function request<T>(input: string, init: RequestInit, options: ComfyUiRequ
             }
             throw controller.signal.reason;
         }
-        if (error instanceof ComfyUiApiError || isAbortError(error)) throw error;
+        if (error instanceof AccountApiError || error instanceof ComfyUiApiError || isAbortError(error)) throw error;
         throw new ComfyUiApiError("COMFYUI_UNAVAILABLE", "无法连接 ComfyUI 网关，请检查服务配置", 503, true);
     } finally {
         clearTimeout(timer);
-        options.signal?.removeEventListener("abort", onAbort);
+        signal.removeEventListener("abort", onAbort);
     }
 }
 

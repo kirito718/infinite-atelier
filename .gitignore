@@ -17,3 +17,6 @@ web/dist
 web/.fix-tmp/
 web/.playwright-cli/
 web/output/
+
+# Root-level Playwright CLI traces (local acceptance only)
+/.playwright-cli/

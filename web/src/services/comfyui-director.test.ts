@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { setAccountIdentity } from "./account-client";
 import type { ComfyUiJobCreate } from "@/types/comfyui";
 import { cancelComfyUiJob, createComfyUiJob, getComfyUiJob, getComfyUiOutput, ComfyUiApiError } from "./comfyui-director";
 
@@ -24,7 +25,9 @@ const input: ComfyUiJobCreate = {
     },
 };
 
+beforeEach(() => setAccountIdentity("alice"));
 afterEach(() => {
+    setAccountIdentity(null);
     vi.restoreAllMocks();
 });
 
@@ -42,6 +45,10 @@ describe("same-origin ComfyUI director client", () => {
         expect(url).toBe("/api/comfyui/jobs");
         expect(url).not.toMatch(/^https?:\/\//);
         expect(init.method).toBe("POST");
+        expect(init.credentials).toBe("same-origin");
+        expect(new Headers(init.headers).get("X-Atelier-Request")).toBe("1");
+        expect(new Headers(init.headers).get("X-Atelier-User")).toBe("alice");
+        expect(new Headers(init.headers).has("Content-Type")).toBe(false);
         expect(init.body).toBeInstanceOf(FormData);
 
         const form = init.body as FormData;
@@ -77,6 +84,11 @@ describe("same-origin ComfyUI director client", () => {
         await expect(cancelComfyUiJob("task/a")).resolves.toBeUndefined();
 
         expect(output.type).toBe("image/webp");
+        for (const [, init] of fetchMock.mock.calls) {
+            expect(init?.credentials).toBe("same-origin");
+            expect(new Headers(init?.headers).get("X-Atelier-Request")).toBe("1");
+            expect(new Headers(init?.headers).get("X-Atelier-User")).toBe("alice");
+        }
         expect(fetchMock.mock.calls.map(([url, init]) => [url, init?.method || "GET"])).toEqual([
             ["/api/comfyui/jobs/task%2Fa", "GET"],
             ["/api/comfyui/jobs/task%2Fa/output", "GET"],

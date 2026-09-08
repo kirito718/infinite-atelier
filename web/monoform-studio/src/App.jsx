@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import {
   ArrowDownToLine, Axis3D, Box, BoxSelect, Camera, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleDot, Copy, Download,
   FileImage, FileVideo2, Focus, FolderOpen, Grid3X3, Import, Link2, Lock, MousePointer2, Move3D, Pause, Play, Plus,
@@ -8,15 +8,13 @@ import {
 } from 'lucide-react'
 import { MainViewport, CameraPreview } from './Viewport.jsx'
 import { ShotsPanel } from './ShotsPanel.jsx'
+import { parseProjectBackup, serializeProjectBackup } from './project-backup.mjs'
 import { JOINT_DEFINITIONS, JOINT_GROUPS, RIG_PRESET_GROUPS, RIG_PRESET_OPTIONS, cloneJointPose, interpolateJointPose, normalizePoseId, poseCanLoop, poseForObject, presetJoints, presetPhase, presetRoot } from './rig.js'
 import { controlPassCamera, isCaptureBusy, isV1ControlPassList, resolveControlCaptureSelection, validateControlCaptureResult } from './control-passes.js'
 
 const CAMERA_ID = '__shot_camera__'
-// When embedded with a ?key=... query (canvas director nodes), scope storage per node so multiple instances do not share a project.
+// PostMessage identity only; all persisted data still comes from account storage.
 const EMBED_KEY = new URLSearchParams(window.location.search).get('key') || ''
-const PROJECT_STORAGE_KEY = EMBED_KEY ? `monoform-project-${EMBED_KEY}` : 'monoform-project'
-const LEGACY_PROJECT_STORAGE_KEY = 'stageframe-project'
-const CUSTOM_POSE_STORAGE_KEY = EMBED_KEY ? `monoform-custom-poses-${EMBED_KEY}` : 'monoform-custom-poses'
 const PROJECT_VERSION = 16
 const DEFAULT_PROJECT_SETTINGS = {
   name: '未命名场景',
@@ -284,20 +282,16 @@ function normalizePerson(object) {
   }
 }
 
-function readCustomPoses() {
-  try {
-    const poses = JSON.parse(localStorage.getItem(CUSTOM_POSE_STORAGE_KEY) || '[]')
-    if (!Array.isArray(poses)) return []
-    return poses.filter(pose => pose?.id && pose?.name).map(pose => ({
-      ...pose,
-      pose: normalizePoseId(pose.pose),
-      poseTime: Number.isFinite(pose.poseTime) ? pose.poseTime : presetPhase(pose.pose),
-      rigRoot: Array.isArray(pose.rigRoot) ? pose.rigRoot.slice(0, 3) : presetRoot(pose.pose),
-      joints: cloneJointPose(pose.joints),
-    }))
-  } catch {
-    return []
-  }
+function readCustomPoses(serialized) {
+  const poses = JSON.parse(serialized ?? '[]')
+  if (!Array.isArray(poses)) throw new Error('账号中的姿势库格式无效，已停止载入。')
+  return poses.filter(pose => pose?.id && pose?.name).map(pose => ({
+    ...pose,
+    pose: normalizePoseId(pose.pose),
+    poseTime: Number.isFinite(pose.poseTime) ? pose.poseTime : presetPhase(pose.pose),
+    rigRoot: Array.isArray(pose.rigRoot) ? pose.rigRoot.slice(0, 3) : presetRoot(pose.pose),
+    joints: cloneJointPose(pose.joints),
+  }))
 }
 
 function normalizeObjectTracks(tracks = {}) {
@@ -421,19 +415,11 @@ function normalizeProjectData(data) {
   }
 }
 
-function readCachedProject() {
-  try {
-    const current = localStorage.getItem(PROJECT_STORAGE_KEY)
-    const legacy = current ? null : localStorage.getItem(LEGACY_PROJECT_STORAGE_KEY)
-    const serialized = current || legacy
-    const data = JSON.parse(serialized || 'null')
-    const normalized = normalizeProjectData(data)
-    if (!normalized) return null
-    if (!current && legacy) localStorage.setItem(PROJECT_STORAGE_KEY, JSON.stringify(normalized))
-    return normalized
-  } catch {
-    return null
-  }
+export function prepareAccountState(storage) {
+  const serialized = storage.getItem(storage.keys.project)
+  const project = normalizeProjectData(JSON.parse(serialized ?? 'null'))
+  if (serialized !== null && !project) throw new Error('账号中的工程格式无效，已停止载入以防覆盖。')
+  return { project, customPoses: readCustomPoses(storage.getItem(storage.keys.customPoses)) }
 }
 
 function projectData({ settings, objects, camera, lighting, reference, keyframes, objectKeyframes, shots, activeShotId }) {
@@ -841,7 +827,7 @@ function Inspector({ selected, camera, selectedJoint, customPoses, onSelectJoint
                     </div>
                   ))}
                 </div>
-              ) : <p className="custom-pose-empty">还没有保存的姿势。调整骨骼后可存入本机姿势库。</p>}
+              ) : <p className="custom-pose-empty">还没有保存的姿势。调整骨骼后可存入当前账号的姿势库。</p>}
             </div>
             <label className="color-field person-color-field"><span>人物颜色</span><input type="color" value={selected.color || '#e8e3d8'} onChange={e => onUpdateObject({ color: e.target.value })} /><output>{selected.color || '#e8e3d8'}</output></label>
           </div>
@@ -1236,8 +1222,8 @@ function ReferenceOverlay({ reference, onChange, onToast, cameraMode = false, ca
   )
 }
 
-export default function App() {
-  const startupProject = useMemo(() => readCachedProject(), [])
+export default function App({ storage, startup }) {
+  const startupProject = startup.project
   const [settings, setSettings] = useState(() => normalizeProjectSettings(startupProject?.settings))
   const [shots, setShots] = useState(() => startupProject?.shots || [{
     id: 'shot-01', name: '镜头 01', thumbnail: '', fps: DEFAULT_PROJECT_SETTINGS.fps, durationSeconds: DEFAULT_PROJECT_SETTINGS.durationSeconds, loopPlayback: false,
@@ -1260,7 +1246,7 @@ export default function App() {
   const [currentFrame, setCurrentFrame] = useState(0)
   const [selectedKeyframe, setSelectedKeyframe] = useState(null)
   const [keyframeClipboard, setKeyframeClipboard] = useState(null)
-  const [customPoses, setCustomPoses] = useState(() => readCustomPoses())
+  const [customPoses, setCustomPoses] = useState(() => startup.customPoses)
   const [playing, setPlaying] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [capturingImage, setCapturingImage] = useState(false)
@@ -1278,7 +1264,9 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [viewFocusRequest, setViewFocusRequest] = useState(null)
   const [toast, setToast] = useState('')
-  const [saveStatus, setSaveStatus] = useState(startupProject ? '已恢复自动保存' : '自动保存已开启')
+  const sync = useSyncExternalStore(storage.subscribe, storage.getSnapshot, storage.getSnapshot)
+  const saveStatus = { saved: '已同步到账号', pending: '有修改待保存…', saving: '保存中…', error: '保存失败', conflict: '版本冲突 · 已停止保存', 'account-changed': '账号已变化 · 已停止保存' }[sync.status]
+  const saveBlocked = sync.status === 'conflict' || sync.status === 'account-changed'
   const [, setHistoryVersion] = useState(0)
   const loadRef = useRef(null)
   const playStartRef = useRef(null)
@@ -1342,6 +1330,8 @@ export default function App() {
     shots,
     activeShotId,
   }), [settings, objects, camera, lighting, reference, keyframes, characterKeyframes, shots, activeShotId])
+  const queuedValuesRef = useRef(null)
+  if (!queuedValuesRef.current) queuedValuesRef.current = { project: JSON.stringify(currentProject), customPoses: JSON.stringify(customPoses) }
 
   useEffect(() => {
     currentFrameRef.current = currentFrame
@@ -1364,8 +1354,11 @@ export default function App() {
   }, [exportDimensions.height, exportDimensions.width, reference])
 
   useEffect(() => {
-    try { localStorage.setItem(CUSTOM_POSE_STORAGE_KEY, JSON.stringify(customPoses)) } catch { /* 姿势库写入失败时不影响工程编辑 */ }
-  }, [customPoses])
+    const serialized = JSON.stringify(customPoses)
+    if (serialized === queuedValuesRef.current.customPoses) return
+    queuedValuesRef.current.customPoses = serialized
+    storage.setItem(storage.keys.customPoses, serialized)
+  }, [customPoses, storage])
 
   useEffect(() => {
     if (selectedKeyframe?.kind === 'object' && selectedKeyframe.trackId !== selectedId) setSelectedKeyframe(null)
@@ -1397,17 +1390,12 @@ export default function App() {
   }, [currentProject])
 
   useEffect(() => {
-    setSaveStatus('保存中…')
-    const timer = setTimeout(() => {
-      try {
-        localStorage.setItem(PROJECT_STORAGE_KEY, JSON.stringify(currentProject))
-        setSaveStatus('已自动保存')
-      } catch {
-        setSaveStatus('自动保存空间不足')
-      }
-    }, 900)
-    return () => clearTimeout(timer)
-  }, [currentProject])
+    const serialized = JSON.stringify(currentProject)
+    // Do not turn hydration/normalization (or an absent document) into a save.
+    if (serialized === queuedValuesRef.current.project) return
+    queuedValuesRef.current.project = serialized
+    storage.setItem(storage.keys.project, serialized)
+  }, [currentProject, storage])
 
   const applyProjectSnapshot = useCallback(snapshot => {
     const normalized = normalizeProjectData(snapshot)
@@ -1806,7 +1794,7 @@ export default function App() {
       rigRoot: [...rig.root],
       joints: cloneJointPose(rig.joints),
     }])
-    setToast(`姿势“${name}”已保存到本机`)
+    setToast(`姿势“${name}”已加入姿势库，请留意顶部保存状态`)
   }
   const applyCustomPose = customPose => {
     if (!customPose || !activeObject || activeObject.type !== 'person') return
@@ -1944,10 +1932,8 @@ export default function App() {
   const saveProject = ({ download = false } = {}) => {
     const data = projectData({ settings, objects, camera, lighting, reference, keyframes, objectKeyframes: characterKeyframes, shots, activeShotId })
     const serialized = JSON.stringify(data)
-    let cached = true
-    try { localStorage.setItem(PROJECT_STORAGE_KEY, serialized) } catch { cached = false }
     if (download) {
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+      const blob = new Blob([serializeProjectBackup(data, customPoses)], { type: 'application/json' })
       const link = document.createElement('a')
       link.href = URL.createObjectURL(blob)
       const safeName = settings.name.replace(/[\\/:*?"<>|]+/g, '-').trim() || 'monoform-project'
@@ -1955,8 +1941,10 @@ export default function App() {
       link.click()
       URL.revokeObjectURL(link.href)
     }
-    if (download) setToast(cached ? '工程 JSON 已导出' : '工程已导出，但浏览器自动保存空间不足')
-    else setToast(cached ? '工程已保存到浏览器' : '浏览器保存空间不足，请使用“导出工程”备份')
+    if (download) { setToast('工程与姿势库 JSON 已导出'); return }
+    storage.setItem(storage.keys.project, serialized)
+    storage.setItem(storage.keys.customPoses, JSON.stringify(customPoses))
+    void storage.retry().then(saved => setToast(saved ? '工程和姿势库已保存到账号' : '尚未保存到账号，请查看保存提示；可先导出工程备份'))
   }
   const handleCaptureImage = async () => {
     if (isCaptureBusy({ lock: exportLockRef.current, video: exporting, image: capturingImage, control: Boolean(controlCapture) })) return
@@ -2218,8 +2206,11 @@ export default function App() {
     const reader = new FileReader()
     reader.onload = () => {
       try {
-        const loaded = normalizeProjectData(JSON.parse(reader.result))
+        const backup = parseProjectBackup(reader.result)
+        const loaded = normalizeProjectData(backup.project)
         if (!loaded) throw new Error('invalid project')
+        const loadedPoses = backup.customPoses === undefined ? undefined : readCustomPoses(JSON.stringify(backup.customPoses))
+        // Validate and normalize the entire backup before applying either document.
         setSettings(loaded.settings)
         setShots(loaded.shots)
         setActiveShotId(loaded.activeShotId)
@@ -2229,6 +2220,7 @@ export default function App() {
         setReference(loaded.reference)
         setKeyframes(loaded.keyframes)
         setCharacterKeyframes(loaded.objectKeyframes)
+        if (loadedPoses !== undefined) setCustomPoses(loadedPoses)
         setObjectDrafts({})
         setSelectedKeyframe(null)
         setCurrentFrame(0)
@@ -2274,19 +2266,26 @@ export default function App() {
         <nav className="top-actions">
           <button onClick={resetProject}><Plus size={14} /> 新建</button>
           <button onClick={() => loadRef.current?.click()}><FolderOpen size={14} /> 打开</button>
-          <button onClick={() => saveProject()}><Save size={14} /> 保存</button>
+          <button onClick={() => saveProject()} disabled={saveBlocked}><Save size={14} /> 保存</button>
           <input ref={loadRef} className="visually-hidden" type="file" accept=".json" onChange={loadProject} />
           <span className="top-divider" />
           <ToolButton icon={Undo2} label="撤销" shortcut="Ctrl+Z" onClick={undo} disabled={!historyRef.current.past.length} />
           <ToolButton icon={Redo2} label="重做" shortcut="Ctrl+Y" onClick={redo} disabled={!historyRef.current.future.length} />
         </nav>
-        <div className="project-title"><i className={`status-dot ${saveStatus === '保存中…' ? '' : 'live'}`} /><button type="button" onClick={() => setSettingsOpen(true)} title="打开时间轴设置"><span>{settings.name}</span><Settings2 size={12} /></button><small>{activeShot?.name} · {saveStatus}</small></div>
+        <div className="project-title"><i className={`status-dot ${sync.status === 'saved' ? 'live' : ''}`} /><button type="button" onClick={() => setSettingsOpen(true)} title="打开时间轴设置"><span>{settings.name}</span><Settings2 size={12} /></button><small role="status" aria-live="polite" title={`账号：${storage.user.displayName || storage.user.username}`}>{activeShot?.name} · {saveStatus}</small></div>
         <div className="export-actions">
           <button className="project-export-button" onClick={() => saveProject({ download: true })} disabled={exporting || capturingImage || Boolean(controlCapture)}><Download size={14} /> 导出工程</button>
           <button className="project-export-button capture-image-button" onClick={handleCaptureImage} disabled={exporting || capturingImage || Boolean(controlCapture)}><FileImage size={14} /> {capturingImage ? '截图中…' : '截图 PNG'}</button>
           <button className="export-button" onClick={handleExportMp4} disabled={exporting || capturingImage || Boolean(controlCapture)}><FileVideo2 size={14} /> {exporting ? `${exportProgress}%` : '导出 MP4'}</button>
         </div>
       </header>
+      {sync.error && <div className="persistence-notice" role="alert">
+        <span>{sync.status === 'conflict' ? '服务器已有较新版本，已停止保存，不会覆盖。请先导出草稿，再重新载入。' : sync.status === 'account-changed' ? '账号已退出或变化，旧草稿已停止保存。请先导出草稿，再登录并重新载入。' : `保存失败，修改仍保留在本页：${sync.error.message}`}</span>
+        {sync.status === 'error' && <button type="button" onClick={() => { void storage.retry() }}>重试保存</button>}
+        <button type="button" onClick={() => saveProject({ download: true })}>导出工程草稿</button>
+        {saveBlocked && <button type="button" onClick={() => window.location.reload()}>重新载入</button>}
+        {sync.status === 'account-changed' && <a href="/" target="_top">前往登录</a>}
+      </div>}
 
       <div className="workspace">
         <LeftSidebar objects={objects} selectedId={selectedId} onSelect={setSelectedId} onAddPerson={addPerson} onAddPrimitive={addPrimitive} onImport={importModel} onToggleVisible={id => updateObjectById(id, { visible: objects.find(item => item.id === id)?.visible === false })} onToggleLock={id => updateObjectById(id, { locked: !objects.find(item => item.id === id)?.locked })} shots={displayedShots} activeShotId={activeShotId} onSelectShot={switchShot} onAddShot={addShot} onDuplicateShot={duplicateShot} onDeleteShot={deleteShot} onRenameShot={renameShot} onCaptureShot={captureShotThumbnail} />

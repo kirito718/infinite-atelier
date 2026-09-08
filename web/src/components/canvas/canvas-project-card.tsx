@@ -1,3 +1,4 @@
+import { useAccountAction } from "@/hooks/use-account-action";
 import { Check, Download, Pencil, Trash2, X } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Button, Input } from "antd";
@@ -11,7 +12,7 @@ export function CanvasProjectCard({ project }: { project: CanvasProject }) {
     const { i18n, t } = useTranslation();
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
-    const renameProject = useCanvasStore((state) => state.renameProject);
+    const renameProject = useAccountAction(useCanvasStore((state) => state.renameProject));
     const selectedIds = useCanvasUiStore((state) => state.selectedProjectIds);
     const editingId = useCanvasUiStore((state) => state.editingProjectId);
     const editingTitle = useCanvasUiStore((state) => state.editingProjectTitle);

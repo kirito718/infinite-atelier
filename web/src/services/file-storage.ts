@@ -1,62 +1,39 @@
-import localforage from "localforage";
+import { assertAccountIdentity, authenticatedFetch as fetch, getAccountIdentity } from "@/services/account-client";
+import { deleteServerFiles, getServerFileBlob, getServerFileUrl, putServerFile } from "@/services/server-files";
+import { proxyApiUrl } from "@/lib/api-proxy";
 import { nanoid } from "nanoid";
 
 export type UploadedFile = { url: string; storageKey: string; bytes: number; mimeType: string; width?: number; height?: number; durationMs?: number };
 
-const store = localforage.createInstance({ name: "infinite-canvas", storeName: "media_files" });
-const objectUrls = new Map<string, string>();
-
 export async function uploadMediaFile(input: string | Blob, prefix = "file"): Promise<UploadedFile> {
-    const blob = typeof input === "string" ? await (await fetch(input)).blob() : input;
-    const storageKey = `${prefix}:${nanoid()}`;
-    await store.setItem(storageKey, blob);
-    const url = URL.createObjectURL(blob);
-    objectUrls.set(storageKey, url);
-    const meta = blob.type.startsWith("video/") ? await readVideoMeta(url) : blob.type.startsWith("audio/") ? await readAudioMeta(url) : {};
-    return { url, storageKey, bytes: blob.size, mimeType: blob.type || "application/octet-stream", ...meta };
+    const userId = getAccountIdentity();
+    assertAccountIdentity(userId);
+    const response = typeof input === "string" ? await fetch(proxyApiUrl(input)) : null;
+    if (response && !response.ok) throw new Error("媒体下载失败，请检查来源和登录状态。");
+    const blob = response ? await response.blob() : (input as Blob);
+    const temporary = URL.createObjectURL(blob);
+    try {
+        const meta = blob.type.startsWith("video/") ? await readVideoMeta(temporary) : blob.type.startsWith("audio/") ? await readAudioMeta(temporary) : {};
+        assertAccountIdentity(userId);
+        const storageKey = `${prefix}:${nanoid()}`;
+        const stored = await putServerFile(storageKey, blob);
+        assertAccountIdentity(userId);
+        return { ...stored, url: getServerFileUrl(storageKey), ...meta };
+    } finally {
+        URL.revokeObjectURL(temporary);
+    }
 }
-
 export async function resolveMediaUrl(storageKey?: string, fallback = "") {
-    if (!storageKey) return fallback;
-    const cached = objectUrls.get(storageKey);
-    if (cached) return cached;
-    const blob = await store.getItem<Blob>(storageKey);
-    if (!blob) return fallback;
-    const url = URL.createObjectURL(blob);
-    objectUrls.set(storageKey, url);
-    return url;
+    return storageKey ? getServerFileUrl(storageKey) : fallback;
 }
-
-export async function getMediaBlob(storageKey: string) {
-    return store.getItem<Blob>(storageKey);
-}
-
+export const getMediaBlob = getServerFileBlob;
 export async function setMediaBlob(storageKey: string, blob: Blob) {
-    await store.setItem(storageKey, blob);
-    const url = URL.createObjectURL(blob);
-    objectUrls.set(storageKey, url);
-    return url;
+    await putServerFile(storageKey, blob);
+    return getServerFileUrl(storageKey);
 }
-
-export async function deleteStoredMedia(keys: Iterable<string>) {
-    await Promise.all(
-        Array.from(new Set(keys)).map(async (key) => {
-            const url = objectUrls.get(key);
-            if (url) URL.revokeObjectURL(url);
-            objectUrls.delete(key);
-            await store.removeItem(key);
-        }),
-    );
-}
-
-export async function cleanupUnusedMedia(usedData: unknown) {
-    const usedKeys = collectMediaStorageKeys(usedData);
-    const unused: string[] = [];
-    await store.iterate((_value, key) => {
-        if (!usedKeys.has(key)) unused.push(key);
-    });
-    await Promise.all(unused.map((key) => store.removeItem(key)));
-}
+export const deleteStoredMedia = deleteServerFiles;
+// See image-storage: never delete shared remote media based on one tab's snapshot.
+export async function cleanupUnusedMedia(_usedData: unknown) {}
 
 export function collectMediaStorageKeys(value: unknown, keys = new Set<string>()) {
     if (!value || typeof value !== "object") return keys;

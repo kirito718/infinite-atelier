@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { comfyuiApiPlugin } from "../vite.config";
+import { codexSubscriptionApiPlugin as comfyuiApiPlugin } from "../vite.config";
 
 const mount = (plugin: ReturnType<typeof comfyuiApiPlugin>, preview = false) => {
     const handlers: any[] = [];
@@ -13,7 +13,7 @@ function response() {
 }
 afterEach(() => vi.unstubAllEnvs());
 
-describe("ComfyUI dev/preview gateway", () => {
+describe("authenticated ComfyUI dev/preview gateway", () => {
     it.each([false, true])("mounts the job route without intercepting frontend pages (preview=%s)", async (preview) => {
         vi.stubEnv("COMFYUI_BASE_URL", "http://comfyui:8188");
         const handle = vi.fn(async () => {});
@@ -25,7 +25,7 @@ describe("ComfyUI dev/preview gateway", () => {
         expect(next).toHaveBeenCalledTimes(1);
         expect(handle).toHaveBeenCalledTimes(1);
     });
-    it("returns a configured error envelope rather than filesystem paths or secrets", () => {
+    it("fails closed when account storage initialization fails without exposing paths or secrets", () => {
         vi.stubEnv("COMFYUI_BASE_URL", "http://comfyui:8188");
         const middleware = mount(
             comfyuiApiPlugin({
@@ -38,7 +38,7 @@ describe("ComfyUI dev/preview gateway", () => {
         middleware({ url: "/api/comfyui/jobs" }, res, vi.fn());
         expect(res.writeHead.mock.calls[0][0]).toBe(503);
         const body = res.end.mock.calls[0][0].toString();
-        expect(JSON.parse(body)).toMatchObject({ error: { code: "COMFYUI_UNAVAILABLE" } });
+        expect(JSON.parse(body)).toMatchObject({ code: "STORAGE_UNAVAILABLE" });
         expect(body).not.toMatch(/secret-value|private\/workflow/);
     });
 });
