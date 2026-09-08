@@ -14,7 +14,7 @@ export function codexSubscriptionApiPlugin({ createApi = createAccountApi } = {}
     let api: ReturnType<typeof createAccountApi> | undefined;
     const middleware = (request: IncomingMessage, response: ServerResponse, next: () => void) => {
         const pathname = new URL(request.url || "/", "http://localhost").pathname;
-        if (!/^\/api\/(account|codex-subscription)(\/|$)/.test(pathname) && pathname !== "/api-proxy") {
+        if (!/^\/api\/(account|codex-subscription|comfyui)(\/|$)/.test(pathname) && pathname !== "/api-proxy") {
             next();
             return;
         }
@@ -35,7 +35,7 @@ export function codexSubscriptionApiPlugin({ createApi = createAccountApi } = {}
 
 export default defineConfig(({ mode }) => {
     // Server-only configuration is never exposed as VITE_* browser variables.
-    const env = loadEnv(mode, webDir, "ATELIER_");
+    const env = loadEnv(mode, webDir, ["ATELIER_", "COMFYUI_"]);
     for (const [key, value] of Object.entries(env)) if (process.env[key] === undefined) process.env[key] = value;
     const configuredDataDir = normalizePath(resolve(process.env.ATELIER_DATA_DIR || resolve(webDir, "data")));
     const dataDir = normalizePath(resolveAccountDataDir());

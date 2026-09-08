@@ -19,6 +19,14 @@ const CONTAINER_ENV = {
     ATELIER_ALLOW_PRIVATE_UPSTREAMS: "false",
     ATELIER_MAX_UPLOAD_BYTES: "65536",
     ATELIER_USER_QUOTA_BYTES: "262144",
+    // Never contact the user's configured GPU during persistence acceptance.
+    COMFYUI_BASE_URL: "http://127.0.0.1:9",
+    COMFYUI_API_PREFIX: "/api",
+    COMFYUI_WS_ENABLED: "false",
+    COMFYUI_TASK_TTL_MS: "1000",
+    COMFYUI_REQUEST_TIMEOUT_MS: "1000",
+    COMFYUI_MAX_BYTES: "65536",
+    COMFYUI_WORKFLOW_DIR: "/app/web/server/workflows",
 };
 export function parseOptions(argv) {
     const options = { image: null, keep: false, keepFailed: false, help: false },
@@ -38,7 +46,7 @@ export function parseOptions(argv) {
     }
     return options;
 }
-export const testEnvironment = (env) => Object.fromEntries(Object.entries(env).filter(([key]) => !/^(ATELIER_|COMPOSE_)/.test(key) && key !== "CODEX_CLI_VERSION"));
+export const testEnvironment = (env) => Object.fromEntries(Object.entries(env).filter(([key]) => !/^(ATELIER_|COMPOSE_|COMFYUI_)/.test(key) && !["CODEX_CLI_VERSION", "IMAGE_TAG", "PULL_POLICY"].includes(key)));
 export function composeArgs({ root, project, envFile, override }, tail) {
     return ["compose", "--ansi", "never", "--project-directory", root, "--project-name", project, "--env-file", envFile, "-f", join(root, "compose.yaml"), ...(override ? ["-f", override] : []), ...tail];
 }
@@ -47,6 +55,7 @@ export function verifyCompose(c, project) {
         v = s?.volumes,
         p = s?.ports;
     check(c.name === project && Object.keys(c.services || {}).join() === "atelier", "Unexpected Compose project/services");
+    check((s.image === `${project}-image:acceptance` && s.pull_policy === "build") || (/^sha256:[a-f0-9]{64}$/.test(s.image || "") && s.pull_policy === "never"), "Expected a unique test image or pinned local image");
     check(!s.container_name && !s.network_mode && !s.privileged && !s.devices && !s.volumes_from && !s.pid && !s.ipc && !s.uts && !s.configs && !s.secrets && !s.external_links, "Unsafe Compose service isolation");
     check(p?.length === 1 && p[0].target === 3000 && String(p[0].published) === "0" && p[0].host_ip === "127.0.0.1" && p[0].protocol === "tcp", "Expected ephemeral localhost port");
     check(v?.length === 1 && v[0].type === "volume" && v[0].source === "atelier-data" && v[0].target === "/data" && !v[0].read_only, "Expected original writable data volume");
@@ -447,7 +456,7 @@ async function main(options) {
         report.checks.push(label);
         await save();
     };
-    const settings = { ATELIER_BIND_ADDRESS: "127.0.0.1", ATELIER_PORT: "0", ...CONTAINER_ENV };
+    const settings = { ATELIER_BIND_ADDRESS: "127.0.0.1", ATELIER_PORT: "0", ATELIER_IMAGE: `${project}-image`, IMAGE_TAG: "acceptance", PULL_POLICY: "build", ...CONTAINER_ENV };
     const writeEnv = () =>
         writeFile(
             paths.envFile,
@@ -692,7 +701,8 @@ console.log(JSON.stringify({ node: process.version, main: hash(fs.readFileSync(p
         });
         await step("Build/start actual Compose service and prove mapped HTTP identity", () => start(true));
         await step("Anonymous protection, first signup/login and closed later registration", async () => {
-            for (const path of ["/api/account/state", "/api/account/files", filePath, "/api/account/usage", "/api/codex-subscription/v1/status", "/api-proxy?target=https%3A%2F%2Fexample.com"]) await api(path, {}, 401);
+            for (const path of ["/api/account/state", "/api/account/files", filePath, "/api/account/usage", "/api/codex-subscription/v1/status", "/api/comfyui/jobs", "/api/comfyui/jobs/unknown/output", "/api-proxy?target=https%3A%2F%2Fexample.com"])
+                await api(path, {}, 401);
             const session = (await api("/api/account/session")).json;
             check(session.user === null && session.registrationAllowed === true, "Volume is not a fresh account store");
             a = await register("acceptance_a");

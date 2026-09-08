@@ -43,11 +43,12 @@ import { AssetPickerModal, type InsertAssetPayload } from "@/components/canvas/a
 import { CanvasSidePanel } from "@/components/canvas/canvas-side-panel";
 import { CanvasZoomControls } from "@/components/canvas/canvas-zoom-controls";
 import { DirectorPanel } from "@/components/canvas/director-panel";
+import type { DirectorGenerationStatus } from "@/components/canvas/director-panel";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { useGenerationHistoryStore, type GenerationHistoryImage } from "@/stores/canvas/use-generation-history-store";
 import { buildNodeMentionReferences, type CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 import { exportCanvasProjects } from "@/lib/canvas/canvas-export";
-import { applyNodeConfigPatch, audioMetadata, buildAudioGenerationMetadata, buildImageGenerationMetadata, createCanvasNode, imageMetadata, videoMetadata } from "@/lib/canvas/canvas-node-factory";
+import { applyNodeConfigPatch, audioMetadata, buildAudioGenerationMetadata, buildImageGenerationMetadata, createCanvasNode, createDirectorImageNode, imageMetadata, videoMetadata } from "@/lib/canvas/canvas-node-factory";
 import { findContainingGroupId, findGroupDropTarget, getConnectionTargetAnchor, normalizeConnection, snapNodesIntoGroup } from "@/lib/canvas/canvas-node-geometry";
 import {
     audioExtension,
@@ -71,6 +72,7 @@ import { getNodeDefinition, isBuiltinNodeType as isBuiltinType } from "@/lib/can
 import { registerBuiltinNodes } from "@/components/canvas/nodes/builtin-nodes";
 import { CanvasRefreshShell } from "@/components/canvas/canvas-refresh-shell";
 import { CanvasTopBar } from "@/components/canvas/canvas-top-bar";
+import { generateDirectorImage } from "@/services/director-generation";
 import { ConnectionCreateMenu, NodeCreateMenu, type PendingConnectionCreate } from "@/components/canvas/canvas-create-menus";
 import {
     CanvasNodeType,
@@ -89,6 +91,8 @@ import {
 } from "@/types/canvas";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio } from "@/types/media";
+import type { DirectorCaptureResult } from "@/types/director";
+import { buildDirectorComfyMetadata, resolveDirectorRetry, type DirectorComfyTask } from "@/lib/canvas/director-node-metadata";
 
 // Register built-in nodes in the shared registry once when the module loads.
 registerBuiltinNodes();
@@ -127,6 +131,12 @@ const NODE_STATUS_IDLE = "idle" as const;
 const NODE_STATUS_LOADING = "loading" as const;
 const NODE_STATUS_SUCCESS = "success" as const;
 const NODE_STATUS_ERROR = "error" as const;
+const DIRECTOR_COMFY_WORKFLOW_ID = "portrait-pose-depth" as const;
+type DirectorGenerationRequest = {
+    directorNodeId: string;
+    resultNodeId: string;
+    controller: AbortController;
+};
 
 async function requestCanvasImageApi(config: AiConfig, prompt: string, references: ReferenceImage[], options?: { signal?: AbortSignal }, mask?: ReferenceImage) {
     if (mask && isCodexSubscriptionModel(config.model)) throw new Error("Codex subscription image editing does not support masks");
@@ -286,10 +296,29 @@ function AtelierCanvasPage() {
     const selectionBoxRef = useRef(selectionBox);
     const pendingConnectionCreateRef = useRef(pendingConnectionCreate);
     const generationRequestsRef = useRef(new Map<string, CanvasGenerationRequest>());
-    useEffect(() => () => {
-        generationRequestsRef.current.forEach(({ controller }) => controller.abort());
-        generationRequestsRef.current.clear();
-    }, []);
+    useEffect(
+        () => () => {
+            generationRequestsRef.current.forEach(({ controller }) => controller.abort());
+            generationRequestsRef.current.clear();
+        },
+        [],
+    );
+    const directorGenerationRef = useRef<DirectorGenerationRequest | null>(null);
+    const [directorGenerationStatus, setDirectorGenerationStatus] = useState<DirectorGenerationStatus>({ state: "idle" });
+
+    // Do not let a job from a closed/deleted canvas mutate a newly opened project.
+    useEffect(
+        () => () => {
+            directorGenerationRef.current?.controller.abort();
+            directorGenerationRef.current = null;
+        },
+        [projectId],
+    );
+
+    useEffect(() => {
+        const active = directorGenerationRef.current;
+        if (active && (!nodes.some((node) => node.id === active.directorNodeId) || !nodes.some((node) => node.id === active.resultNodeId))) active.controller.abort();
+    }, [nodes]);
 
     const createHistoryEntry = useCallback(
         (): CanvasHistoryEntry => ({
@@ -2404,6 +2433,18 @@ function AtelierCanvasPage() {
 
     const handleRetryNode = useCallback(
         async (node: CanvasNodeData, imageId?: string) => {
+            const directorRetry = resolveDirectorRetry(node, nodesRef.current);
+            if (directorRetry.kind === "director") {
+                // Control blobs are intentionally not stored in canvas JSON.
+                // Return to the correct Director for an explicit fresh capture,
+                // never silently switch this result to the generic image provider.
+                setDialogNodeId(directorRetry.nodeId);
+                return;
+            }
+            if (directorRetry.kind === "missing-director") {
+                message.warning("原导演节点已删除，请新建导演台并重新生成");
+                return;
+            }
             const sourceNode = findRetrySourceNode(node.id, nodesRef.current, connectionsRef.current) || node;
             const savedImageMetadata = node.type === CanvasNodeType.Image ? node.metadata : undefined;
             const hasSavedImageMetadata = Boolean(savedImageMetadata?.generationType);
@@ -2744,6 +2785,92 @@ function AtelierCanvasPage() {
         setContextMenu({ type: "node", x: event.clientX, y: event.clientY, nodeId });
     }, []);
 
+    const handleDirectorComfyGenerate = useCallback(
+        async (directorNodeId: string, captureResult: DirectorCaptureResult): Promise<void> => {
+            if (directorGenerationRef.current) return;
+            const director = nodesRef.current.find((node) => node.id === directorNodeId && node.type === CanvasNodeType.Director);
+            if (!director) return;
+            const { shotId, frame, pose, depth, camera } = captureResult.payload;
+            if (pose.width !== depth.width || pose.height !== depth.height) {
+                message.error("Pose 与 Depth 尺寸不一致，请重新捕获");
+                return;
+            }
+            const prompt = director.metadata?.prompt?.trim() || "Photorealistic portrait, natural lighting, realistic skin texture, accurate anatomy, guided by the supplied pose and depth controls";
+            const child = createDirectorImageNode(
+                director,
+                {
+                    source: "monoform",
+                    generationProvider: "comfyui",
+                    directorNodeId,
+                    directorShotId: shotId,
+                    directorFrame: frame,
+                    workflowId: DIRECTOR_COMFY_WORKFLOW_ID,
+                    prompt,
+                    status: NODE_STATUS_LOADING,
+                },
+                nodesRef.current,
+            );
+            const controller = new AbortController();
+            const request: DirectorGenerationRequest = { directorNodeId, resultNodeId: child.id, controller };
+            directorGenerationRef.current = request;
+            const isCurrent = () => directorGenerationRef.current === request;
+            startGenerationRequest(child.id, directorNodeId, child.id, controller);
+            setRunningNodeId(child.id);
+            setDirectorGenerationStatus({ directorNodeId, state: "queued", message: "正在提交真人图任务…" });
+            setNodes((prev) => [...prev, child]);
+            setSelectedNodeIds(new Set([child.id]));
+            setSelectedConnectionId(null);
+            try {
+                const { uploaded, task } = await generateDirectorImage(
+                    { workflowId: DIRECTOR_COMFY_WORKFLOW_ID, prompt, shotId, frame, width: pose.width, height: pose.height, pose, depth, camera },
+                    {
+                        signal: controller.signal,
+                        onStatus: (status) => {
+                            if (!isCurrent()) return;
+                            const percent = status.progress?.percent ?? (status.progress?.step !== undefined && status.progress.max ? (status.progress.step / status.progress.max) * 100 : undefined);
+                            const state = status.status === "succeeded" ? "saving" : status.status === "running" ? "running" : status.status === "failed" ? "failed" : status.status === "cancelled" ? "cancelled" : "queued";
+                            const statusText = state === "saving" ? "正在下载并保存图片…" : state === "running" ? "ComfyUI 正在生成真人图…" : state === "queued" ? "真人图任务已排队…" : status.error?.message;
+                            setDirectorGenerationStatus({ directorNodeId, state, progress: percent === undefined ? undefined : Math.max(0, Math.min(100, percent)), message: statusText });
+                            setNodes((prev) =>
+                                prev.map((node) =>
+                                    node.id === child.id && (node.metadata?.generationTaskId !== status.taskId || node.metadata?.comfyPromptId !== status.promptId)
+                                        ? { ...node, metadata: { ...node.metadata, generationTaskId: status.taskId, comfyPromptId: status.promptId } }
+                                        : node,
+                                ),
+                            );
+                        },
+                    },
+                );
+                if (!isCurrent()) return;
+                const metadata = buildDirectorComfyMetadata(uploaded, { ...task, directorNodeId, shotId, frame } satisfies DirectorComfyTask);
+                const size = fitNodeSize(uploaded.width, uploaded.height, NODE_DEFAULT_SIZE[CanvasNodeType.Image].width, NODE_DEFAULT_SIZE[CanvasNodeType.Image].height);
+                setNodes((prev) => prev.map((node) => (node.id === child.id ? { ...node, ...size, metadata: { ...node.metadata, ...metadata } } : node)));
+                setDirectorGenerationStatus({ directorNodeId, state: "succeeded", progress: 100, message: "真人图已保存并插入画布" });
+            } catch (error) {
+                if (!isCurrent()) return;
+                const cancelled = error instanceof Error && error.name === "AbortError";
+                const errorDetails = cancelled ? "真人图生成已取消，可从导演台重新生成" : error instanceof Error ? error.message : "真人图生成失败，请检查 ComfyUI 配置后重试";
+                setNodes((prev) => prev.map((node) => (node.id === child.id ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails } } : node)));
+                setDirectorGenerationStatus({ directorNodeId, state: cancelled ? "cancelled" : "failed", message: errorDetails });
+                if (!cancelled) message.error(errorDetails);
+            } finally {
+                finishGenerationRequest(child.id, controller);
+                if (isCurrent()) {
+                    setRunningNodeId((current) => (current === child.id ? null : current));
+                    directorGenerationRef.current = null;
+                }
+            }
+        },
+        [finishGenerationRequest, message, startGenerationRequest],
+    );
+
+    const handleDirectorGenerationCancel = useCallback((directorNodeId: string) => {
+        const active = directorGenerationRef.current;
+        if (!active || active.directorNodeId !== directorNodeId) return;
+        setDirectorGenerationStatus({ directorNodeId, state: "cancelling", message: "正在取消真人图生成…" });
+        active.controller.abort();
+    }, []);
+
     const renderNodePanel = useCallback(
         (panelNode: CanvasNodeData) =>
             panelNode.type === CanvasNodeType.Director ? null : panelNode.type === CanvasNodeType.Config ? (
@@ -2962,10 +3089,16 @@ function AtelierCanvasPage() {
                         open
                         closeRequested={requestedDirectorId !== directorPanelNodeId}
                         onClose={() => {
-                            setDirectorPanelNodeId((current) => current === directorPanelNodeId ? null : current);
-                            setDialogNodeId((current) => current === directorPanelNodeId ? null : current);
+                            setDirectorPanelNodeId((current) => (current === directorPanelNodeId ? null : current));
+                            setDialogNodeId((current) => (current === directorPanelNodeId ? null : current));
                         }}
                         onExport={handleDirectorExport(directorPanelNodeId)}
+                        onGenerateComfy={(captureResult) => void handleDirectorComfyGenerate(directorPanelNodeId, captureResult)}
+                        onGenerationCancel={() => handleDirectorGenerationCancel(directorPanelNodeId)}
+                        generationStatus={directorGenerationStatus.directorNodeId === directorPanelNodeId ? directorGenerationStatus : undefined}
+                        busy={Boolean(directorGenerationRef.current && directorGenerationRef.current.directorNodeId !== directorPanelNodeId)}
+                        prompt={nodes.find((node) => node.id === directorPanelNodeId)?.metadata?.prompt || ""}
+                        onPromptChange={(prompt) => setNodes((prev) => prev.map((node) => (node.id === directorPanelNodeId ? { ...node, metadata: { ...node.metadata, prompt } } : node)))}
                     />
                 ) : null}
 

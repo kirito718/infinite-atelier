@@ -19,7 +19,7 @@
         "test": "npm run test:unit && npm run test:server && npm run test:director && npm run test:container:helpers",
         "test:server": "node --test local-bridge/*.test.mjs server/*.test.mjs",
         "test:storage": "node --test server/account-*.test.mjs",
-        "test:director": "node --test monoform-studio/src/*.test.mjs",
+        "test:director": "node --test monoform-studio/src/*.test.mjs monoform-studio/src/*.test.js",
         "build:all": "npm run build:monoform && npm run build",
         "test:container": "node scripts/verify-container.mjs",
         "test:container:helpers": "node --test scripts/verify-container.test.mjs"
@@ -69,5 +69,15 @@
     },
     "engines": {
         "node": ">=22.12.0"
+    },
+    "optionalDependencies": {
+        "@esbuild/linux-arm64": "^0.28.1",
+        "@esbuild/linux-x64": "^0.28.1",
+        "@rollup/rollup-linux-arm64-gnu": "^4.62.2",
+        "@rollup/rollup-linux-x64-gnu": "^4.62.2",
+        "@tailwindcss/oxide-linux-arm64-gnu": "^4.2.4",
+        "@tailwindcss/oxide-linux-x64-gnu": "^4.2.4",
+        "lightningcss-linux-arm64-gnu": "^1.32.0",
+        "lightningcss-linux-x64-gnu": "^1.32.0"
     }
 }

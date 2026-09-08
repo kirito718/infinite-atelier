@@ -22,7 +22,8 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: web/package-lock.json
-      - run: npm ci --legacy-peer-deps
+      - run: npm ci --legacy-peer-deps --include=optional
+      - run: npm ci --prefix monoform-studio --include=optional
       - run: npm test
       - run: npm run typecheck
       - run: npm run build:all

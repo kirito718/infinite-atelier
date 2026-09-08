@@ -108,7 +108,7 @@ npm start
 ### Docker 单机部署
 
 ```bash
-# 在仓库根目录执行；可复制 web/.env.example 为根目录 .env 来配置 Compose
+# 在仓库根目录执行；可复制 .env.example 为根目录 .env 来配置 Compose
 # 默认仅监听宿主机 127.0.0.1，使用反向代理提供 HTTPS
 docker compose up -d --build
 docker compose logs -f atelier
@@ -154,6 +154,85 @@ ATELIER_DATA_DIR=/var/lib/infinite-atelier npm start
 当前模式支持单机内多账号隔离，但不支持多副本共享 SQLite 或多人同时编辑同一项目。请在 HTTPS 反向代理后部署，限制公开注册并定期备份。Codex client/任务和文件目录按用户独立；同时驻留连接上限为 16，达到上限需重启实例释放连接。
 
 **Codex 信任边界：** Codex CLI 是可执行工具的服务端进程，按账号目录/API 分隔不等于操作系统级隔离。只向可信账号开放此实例；互不信任的用户应使用独立容器/实例和数据卷，不应把此单机部署当作对抗性多租户平台。自定义模型脚本也只应运行可信内容；它们不是隔离的不可信代码沙箱。
+
+## Docker 部署（Codex 订阅）
+
+Docker 镜像包含构建后的 Infinite Atelier、Codex CLI、用户系统和生成接口。服务名为 `atelier`，默认只绑定本机 `127.0.0.1:3000`。所有账号数据保存在 `atelier-data` 卷的 `/data`；Codex 登录凭据按应用账号位于 `/data/codex/<user-id>`，不再共享一个全局登录。
+
+### 本地构建与启动
+
+在仓库根目录执行：
+
+```bash
+test -e .env || cp .env.example .env   # 保留已有配置
+docker compose build
+docker compose up -d
+docker compose logs -f atelier
+```
+
+打开 `http://127.0.0.1:3000` 后先注册或登录应用账号，再到配置 → 渠道 → Codex 订阅中点击“连接 ChatGPT”。浏览器不需要填写 ChatGPT OAuth token；凭据由该账号的服务器端 Codex CLI 管理。
+
+```bash
+docker compose down       # 停止并移除容器，保留持久卷
+docker compose up -d      # 使用原卷重新启动
+```
+
+**不要执行 `docker compose down -v`：它会删除账号、画布、媒体、加密密钥和 OAuth 凭据，而不只是退出登录。** 升级前先备份完整 `atelier-data`，再拉取/构建镜像并重建容器。
+
+### 从旧版 `codex-data` 升级
+
+旧版仅持久化共享 Codex 登录。新版本使用新的 `atelier-data` 卷，不会删除、导入或复用旧卷里的全局 OAuth 凭据，也不会将其自动分配给第一个账号。保留旧卷及受控备份，在新版本注册应用账号后重新连接 ChatGPT。浏览器中的画布/素材需使用登录后的迁移提示导入；不要将旧 `codex-data` 直接覆盖到新的 `/data`。
+
+### 备份与恢复 `atelier-data`
+
+完整备份必须包含 SQLite 数据库、配对的 `encryption.key`、媒体以及全部账号的 `codex` 子目录。停止 `atelier` 后再归档整个 `/data`，完成后重新启动；详见上方“一致备份”说明。只备份 `/data/codex` 无法恢复画布或账号。
+
+恢复前先停止服务并独立备份现有数据，将归档恢复到空的数据目录/卷，确认容器 UID 1000 的权限后再启动。不要把旧 WAL 文件、另一份数据库和不匹配的密钥混在一起，也不要在运行中的服务上覆盖数据库。备份含用户内容、API Key 与 OAuth 凭据，必须限制访问并加密保存，不能提交到仓库或日志系统。
+
+Compose 支持以下环境变量：
+
+```bash
+IMAGE_TAG=latest \
+ATELIER_IMAGE=ghcr.io/kirito718/infinite-atelier \
+ATELIER_BIND_ADDRESS=127.0.0.1 \
+docker compose up -d
+```
+
+`IMAGE_TAG` 默认是 `latest`，`ATELIER_IMAGE` 默认是 `ghcr.io/kirito718/infinite-atelier`，`ATELIER_BIND_ADDRESS` 默认是 `127.0.0.1`；端口默认是 `3000`。`PULL_POLICY` 默认是 `build`，因此源码运行会构建本地镜像；已执行 `docker compose pull` 的 GHCR 镜像请用 `PULL_POLICY=never` 启动，避免 Compose 改为本地构建或再次拉取。除非已经配置受保护的 HTTPS 反向代理或 VPN，否则请保持 `ATELIER_BIND_ADDRESS=127.0.0.1`，不要将容器端口直接暴露到公网。该部署按单用户实例设计，不提供多用户账号、权限隔离或租户边界。
+
+### 从 GHCR 使用预构建镜像
+
+不需要本地构建时，可以指定 GitHub Container Registry 镜像并启动：
+
+```bash
+IMAGE_TAG=latest \
+ATELIER_IMAGE=ghcr.io/kirito718/infinite-atelier \
+docker compose pull atelier
+IMAGE_TAG=latest \
+ATELIER_IMAGE=ghcr.io/kirito718/infinite-atelier \
+PULL_POLICY=never \
+docker compose up -d atelier
+```
+
+GHCR 发布的镜像提供 `linux/amd64` 和 `linux/arm64` 多架构变体，Docker 会按主机架构选择对应镜像。版本标签也可以通过 `IMAGE_TAG` 指定；升级时保留完整 `atelier-data`，以保留账号、内容和各账号登录状态。
+
+GitHub Actions 只负责测试、构建和发布镜像：CI 不执行真实的 ChatGPT OAuth 登录，也不执行真实图片生成。首次登录和生图验证必须在部署后的应用页面中由用户完成。
+
+Docker 运行方式仍受同样的安全边界约束：若需要从其他设备访问，请让 Docker 继续监听回环地址，并在 VPN 或带认证的 HTTPS 反向代理后提供访问；不要把未保护的 HTTP 端口直接发布到公网。
+
+## 导演台 + MONOFORM + ComfyUI
+
+导演台新增 **生成真人图**：摆人物/选择动作 → 捕获当前镜头与当前帧的 Pose、Depth → 服务端提交 ComfyUI 工作流 → 将结果保存到无限画布。支持提示词、进度、取消与重试；浏览器只访问同源网关。
+
+```sh
+# 先启动已配置模型的 ComfyUI，再启动本项目
+cd web
+COMFYUI_BASE_URL=http://127.0.0.1:8188 COMFYUI_API_PREFIX=/api npm run dev
+```
+
+容器化入口为根目录 `Dockerfile`、`compose.yaml` 和 `.env.example`；已有 Docker 构建流水线已纳入本分支。Linux NVIDIA 可启用 `gpu` profile；Mac 或已有远端 GPU 只启动 Atelier 并覆盖上游私网地址。
+
+完整模型清单、Docker/GPU 前置条件、远端拓扑、持久化与排障见 [ComfyUI 部署文档](docs/comfyui.md)。任务查询、输出和取消已按应用账号隔离；任务队列仍在内存中，服务重启会中断待完成任务，已保存的结果则持久化到所属账号。真实生成需要自行配置 ComfyUI 与模型；不包含 GPU 资源或模型授权。
 
 ## 目录
 

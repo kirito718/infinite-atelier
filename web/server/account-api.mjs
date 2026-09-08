@@ -5,6 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createCodexAppServerClient } from "../local-bridge/app-server-client.mjs";
 import { createCodexSubscriptionApi } from "./codex-subscription-api.mjs";
+import { createConfiguredComfyUiApi } from "./comfyui-gateway.mjs";
 import { openAccountDatabase } from "./account-database.mjs";
 import { resolveAccountDataDir } from "./account-paths.mjs";
 import { clearCookie, createRateLimiter, getSessionToken, getSessionUser, hashPassword, issueSession, publicUser, tokenHash, validatePassword, validateUsername, verifyPassword } from "./account-auth.mjs";
@@ -36,6 +37,7 @@ export function createAccountApi({
     quotaBytes = byteSetting(process.env.ATELIER_USER_QUOTA_BYTES, 2 * 1024 * 1024 * 1024),
     allowPrivateUpstreams = process.env.ATELIER_ALLOW_PRIVATE_UPSTREAMS === "true",
     codexFactory = defaultCodexFactory,
+    comfyuiFactory = createConfiguredComfyUiApi,
 } = {}) {
     dataDir = resolveAccountDataDir(dataDir);
     const storage = openAccountDatabase(dataDir);
@@ -43,6 +45,7 @@ export function createAccountApi({
     const files = createFileStorage({ db, dataDir, maxUploadBytes, quotaBytes });
     const rateLimit = createRateLimiter();
     const codexRuntimes = new Map();
+    const comfyuiRuntimes = new Map();
     let closed = false;
     const registrationAllowed = () => allowRegistration || db.prepare("SELECT count(*) AS count FROM users").get().count === 0;
     const revokeCurrent = (req) => {
@@ -207,6 +210,23 @@ export function createAccountApi({
             await proxyAccountRequest(req, res, { target: url.searchParams.get("target"), allowPrivate: allowPrivateUpstreams });
             return;
         }
+        if (pathname === "/api/comfyui" || pathname.startsWith("/api/comfyui/")) {
+            let runtime = comfyuiRuntimes.get(user.id);
+            if (!runtime) {
+                if (comfyuiRuntimes.size >= 16) throw new HttpError(503, "COMFYUI_CAPACITY", "当前服务的 ComfyUI 用户连接已达上限，请联系管理员。");
+                try {
+                    // Each runtime owns its own job/idempotency/output store. The
+                    // private GPU endpoint is shared, but task access never is.
+                    runtime = comfyuiFactory({ userId: user.id });
+                } catch (error) {
+                    const message = error?.code === "COMFYUI_NOT_CONFIGURED" ? "ComfyUI 尚未配置，请在服务器设置 COMFYUI_BASE_URL。" : "ComfyUI 网关配置不可用，请检查服务端配置与工作流。";
+                    throw new HttpError(503, "COMFYUI_UNAVAILABLE", message);
+                }
+                comfyuiRuntimes.set(user.id, runtime);
+            }
+            await runtime.handle(req, res);
+            return;
+        }
         if (pathname === "/api/codex-subscription" || pathname.startsWith("/api/codex-subscription/")) {
             let runtime = codexRuntimes.get(user.id);
             if (!runtime) {
@@ -236,7 +256,7 @@ export function createAccountApi({
             if (closed) return;
             closed = true;
             await files.settled();
-            await Promise.allSettled([...codexRuntimes.values()].map((runtime) => runtime.close?.()));
+            await Promise.allSettled([...codexRuntimes.values(), ...comfyuiRuntimes.values()].map((runtime) => runtime.close?.()));
             storage.close();
         },
     };

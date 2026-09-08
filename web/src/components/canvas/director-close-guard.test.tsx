@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { ReactNode } from "react";
 import { DirectorPanel } from "./director-panel";
@@ -13,6 +13,7 @@ vi.mock("antd", () => ({
         return <div>{props.children}</div>;
     },
     Alert: () => null,
+    Input: ({ value }: { value?: string }) => <input value={value} readOnly />,
     Button: ({ children }: { children?: ReactNode }) => <button>{children}</button>,
 }));
 const deferred = () => {
@@ -25,10 +26,12 @@ const deferred = () => {
     return { promise, resolve, reject };
 };
 function mountPanel(onClose: () => void) {
-    renderToStaticMarkup(<DirectorPanel nodeId="director-1" open onClose={onClose} onExport={() => {}} />);
+    renderToStaticMarkup(<DirectorPanel nodeId="director-1" open onClose={onClose} onExport={() => {}} onGenerateComfy={() => {}} onGenerationCancel={() => {}} prompt="" onPromptChange={() => {}} />);
     return fixture.modals.find((modal) => modal.open)!;
 }
+afterEach(() => vi.unstubAllGlobals());
 beforeEach(() => {
+    vi.stubGlobal("window", { location: { href: "http://localhost:3000/canvas" } });
     fixture.flush.mockReset();
     fixture.modals.length = 0;
 });

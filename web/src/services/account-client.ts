@@ -44,7 +44,7 @@ function protectedUrl(input: string | URL | Request) {
     const origin = typeof window === "undefined" ? "http://localhost" : window.location.origin;
     try {
         const url = new URL(text, origin);
-        return url.origin === origin && (url.pathname.startsWith("/api/account/") || url.pathname.startsWith("/api/codex-subscription/") || url.pathname === "/api-proxy");
+        return url.origin === origin && (url.pathname.startsWith("/api/account/") || url.pathname.startsWith("/api/codex-subscription/") || url.pathname.startsWith("/api/comfyui/") || url.pathname === "/api-proxy");
     } catch {
         return false;
     }
@@ -64,6 +64,7 @@ export function accountHeaders(extra?: HeadersInit, userId = identity): Headers 
 export async function authenticatedFetch(input: string | URL | Request, init: RequestInit = {}): Promise<Response> {
     if (!protectedUrl(input)) return globalThis.fetch(input, init);
     const userId = identity;
+    const accountSignal = sessionController.signal;
     const headers = accountHeaders(init.headers);
     // Callers such as the save queue can pin a prior request to its captured account.
     const supplied = new Headers(init.headers).get("X-Atelier-User");
@@ -72,14 +73,16 @@ export async function authenticatedFetch(input: string | URL | Request, init: Re
         ...init,
         credentials: "same-origin",
         headers,
-        signal: init.signal ? AbortSignal.any([init.signal, sessionController.signal]) : sessionController.signal,
+        signal: init.signal ? AbortSignal.any([init.signal, accountSignal]) : accountSignal,
     });
-    if (identity !== userId) throw new AccountApiError(409, "ACCOUNT_CHANGED", "账号已切换。");
+    if (identity !== userId || accountSignal.aborted) throw new AccountApiError(409, "ACCOUNT_CHANGED", "账号已切换。");
     if (response.status === 401 || response.status === 409) {
         const body = await response
             .clone()
             .json()
             .catch(() => ({}));
+        // A delayed error body must not expire a replacement session (even for the same user).
+        if (identity !== userId || accountSignal.aborted) throw new AccountApiError(409, "ACCOUNT_CHANGED", "账号已切换。");
         signalIdentityError(body.code);
     }
     return response;

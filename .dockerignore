@@ -15,3 +15,23 @@
 **/encryption.key
 **/atelier.sqlite*
 backups
+.env*
+!.env.example
+data
+logs
+*.log
+coverage
+test-results
+playwright-report
+web/output
+web/.fix-tmp
+web/.playwright-cli
+.codex
+.claude
+.browser
+.cache
+.DS_Store
+
+# Rebuilt from source inside the image; never ship local stale hashed bundles.
+web/public/monoform/assets
+web/public/monoform/index.html

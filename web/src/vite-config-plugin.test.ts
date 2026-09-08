@@ -23,9 +23,11 @@ describe("codex subscription Vite API plugin", () => {
         await mounted[0]({ url: "/api/codex-subscription/v1/status" }, {}, next);
         await mounted[0]({ url: "/api/account/session" }, {}, next);
         await mounted[0]({ url: "/api-proxy?target=https%3A%2F%2Fexample.com" }, {}, next);
+        await mounted[0]({ url: "/api/comfyui/jobs" }, {}, next);
+        await mounted[0]({ url: "/api/comfyui/jobs/task-1/output" }, {}, next);
         await mounted[0]({ url: "/other" }, {}, next);
 
-        expect(api.handle).toHaveBeenCalledTimes(3);
+        expect(api.handle).toHaveBeenCalledTimes(5);
         expect(next).toHaveBeenCalledTimes(1);
     });
 });

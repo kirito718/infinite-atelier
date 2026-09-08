@@ -167,6 +167,8 @@ type AtelierMonoformMessage = {
 }
 ```
 
+`shotId` and `frame` may be omitted together to capture the currently active shot/frame inside MONOFORM. Explicit shot IDs must match the mounted active shot; an unknown ID must not relabel another shot's pixels.
+
 ### Capture result
 
 The structured-clone payload contains `Blob` values in the first implementation. If memory pressure is observed, switch to transferable `ArrayBuffer` values without changing the envelope.
@@ -309,7 +311,7 @@ atelier:3000  ->  comfyui:8188
 
 ```env
 COMFYUI_BASE_URL=http://comfyui:8188
-COMFYUI_API_PREFIX=
+COMFYUI_API_PREFIX=/api
 COMFYUI_WS_ENABLED=true
 COMFYUI_TASK_TTL_MS=3600000
 ```

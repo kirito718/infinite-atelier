@@ -9,6 +9,8 @@ const fixture = () => ({
     name: project,
     services: {
         atelier: {
+            image: `${project}-image:acceptance`,
+            pull_policy: "build",
             ports: [{ target: 3000, published: "0", host_ip: "127.0.0.1", protocol: "tcp" }],
             volumes: [{ type: "volume", source: "atelier-data", target: "/data" }],
             networks: { default: null },
@@ -20,6 +22,13 @@ const fixture = () => ({
                 ATELIER_ALLOW_PRIVATE_UPSTREAMS: "false",
                 ATELIER_MAX_UPLOAD_BYTES: "65536",
                 ATELIER_USER_QUOTA_BYTES: "262144",
+                COMFYUI_BASE_URL: "http://127.0.0.1:9",
+                COMFYUI_API_PREFIX: "/api",
+                COMFYUI_WS_ENABLED: "false",
+                COMFYUI_TASK_TTL_MS: "1000",
+                COMFYUI_REQUEST_TIMEOUT_MS: "1000",
+                COMFYUI_MAX_BYTES: "65536",
+                COMFYUI_WORKFLOW_DIR: "/app/web/server/workflows",
             },
         },
     },
@@ -72,6 +81,10 @@ test("environment removes inherited Atelier/Compose/build overrides but preserve
         COMPOSE_PROJECT_NAME: "user",
         COMPOSE_ENV_FILES: "/user/.env",
         CODEX_CLI_VERSION: "unapproved",
+        COMFYUI_BASE_URL: "https://production-gpu.example",
+        COMFYUI_WORKFLOW_DIR: "/user/workflows",
+        IMAGE_TAG: "production",
+        PULL_POLICY: "always",
         OTHER: "retained",
     });
     assert.deepEqual(env, { PATH: "/bin", DOCKER_BIN: "/bin/docker", DOCKER_HOST: "unix:///vm/docker.sock", DOCKER_CONFIG: "/custom docker/config", DOCKER_TLS_VERIFY: "1", DOCKER_CERT_PATH: "/tls", OTHER: "retained" });
@@ -101,6 +114,12 @@ test("Compose paths and project are separate argv entries with an explicit env f
 test("resolved Compose cannot bind user directories, fixed ports, global names or external resources", () => {
     assert.doesNotThrow(() => verifyCompose(fixture(), project));
     for (const mutate of [
+        (c) => {
+            c.services.atelier.image = "ghcr.io/user/production:latest";
+        },
+        (c) => {
+            c.services.atelier.environment.COMFYUI_BASE_URL = "https://production-gpu.example";
+        },
         (c) => {
             c.name = "other";
         },
@@ -323,7 +342,7 @@ test("an unconfirmed POSIX group reports live PIDs and cannot authorize cleanup"
     `;
     const result = JSON.parse((await runProcess(process.execPath, ["--input-type=module", "-e", script], { timeout: 8500 })).stdout);
     assert.equal(result.termination?.confirmed, false);
-    assert.ok(result.termination.livePids?.includes(result.worker), "unconfirmed evidence must identify the actual surviving group member");
+    assert.ok(result.termination.livePids?.includes(result.worker), `unconfirmed evidence must identify the actual surviving group member: ${JSON.stringify(result)}`);
     assert.equal(result.termination.closed, true, "launcher exit alone must not count as tree termination");
     assert.equal(result.calls, 0);
     assert.equal(result.blocked, true);
