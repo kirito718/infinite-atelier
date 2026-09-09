@@ -12,6 +12,8 @@ RUN NODE_OPTIONS="${BUILD_NODE_OPTIONS}" npm run build:all
 
 FROM node:22-bookworm-slim AS runtime
 ARG CODEX_CLI_VERSION=0.153.4
+# Node carries its own roots, but the native Codex CLI needs the OS trust store.
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
 RUN npm install --global @openai/codex@${CODEX_CLI_VERSION} && codex --version && npm cache clean --force \
     && mkdir -p /data /app/web && chown -R node:node /data /app
 WORKDIR /app/web

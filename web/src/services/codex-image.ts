@@ -7,6 +7,13 @@ const POLL_INTERVAL_MS = 250;
 
 export type CodexStatus = "disconnected" | "connecting" | "connected" | "unavailable";
 
+export type CodexLogin = {
+    type: "chatgptDeviceCode";
+    loginId: string;
+    verificationUrl: "https://auth.openai.com/codex/device";
+    userCode: string;
+};
+
 export type CodexImageTask = {
     taskId: string;
 };
@@ -22,13 +29,37 @@ type RequestOptions = { signal?: AbortSignal };
 
 export async function getCodexStatus(options?: RequestOptions): Promise<CodexStatus> {
     const response = await request(`${CODEX_BASE_PATH}/status`, { signal: options?.signal });
-    const payload = (await response.json()) as { status?: CodexStatus };
-    return payload.status || "unavailable";
+    const payload = await response.json().catch(() => null);
+    const status: unknown = payload?.status;
+    if (status !== "disconnected" && status !== "connecting" && status !== "connected" && status !== "unavailable") throw new Error("Invalid Codex status response. Please retry.");
+    return status;
 }
 
-export async function beginCodexLogin(options?: RequestOptions) {
+export async function beginCodexLogin(options?: RequestOptions): Promise<CodexLogin> {
     const response = await request(`${CODEX_BASE_PATH}/login`, { method: "POST", signal: options?.signal });
-    return (await response.json()) as { authUrl: string };
+    const payload = await response.json().catch(() => null);
+    if (payload?.type !== "chatgptDeviceCode" || !isLoginString(payload.loginId, 200) || !isLoginString(payload.userCode, 128)) {
+        throw new Error("Invalid Codex device-code login response. Please retry; browser OAuth is not supported here.");
+    }
+    // An exact allowlist also excludes credentials, query strings and code-bearing fragments.
+    const verificationUrl = "https://auth.openai.com/codex/device";
+    if (payload.verificationUrl !== verificationUrl && payload.verificationUrl !== `${verificationUrl}/`) {
+        throw new Error("Invalid Codex login response: expected the official OpenAI device authorization URL.");
+    }
+    return { type: "chatgptDeviceCode", loginId: payload.loginId, verificationUrl, userCode: payload.userCode };
+}
+
+function isLoginString(value: unknown, maxLength: number): value is string {
+    return typeof value === "string" && value.length > 0 && value.length <= maxLength && value.trim() === value && !/[\u0000-\u001f\u007f]/.test(value);
+}
+
+export async function cancelCodexLogin(loginId: string, options?: RequestOptions): Promise<void> {
+    await request(`${CODEX_BASE_PATH}/login/cancel`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ loginId }),
+        signal: options?.signal,
+    });
 }
 
 export async function logoutCodex(options?: RequestOptions) {

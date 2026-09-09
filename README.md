@@ -154,12 +154,18 @@ npm run dev:atelier
 
 然后打开配置 → 渠道 → Codex 订阅：
 
-1. 点击“连接 ChatGPT”并完成官方登录。
-2. 选择 `gpt-image-2`，创建一个图片节点，先测试纯提示词生图。
-3. 再连接一张参考图测试图片编辑，并确认结果同时出现在画布和素材库。
-4. 创建视频节点，确认它仍使用已配置的视频渠道；Codex 订阅不会出现在视频模型选择中。
-5. 点击“断开连接”，确认普通 API 渠道仍可使用。
-6. 如需检查凭据边界，可查看浏览器 `localStorage` 与 IndexedDB：其中不应出现 ChatGPT OAuth token。
+1. 点击“连接 ChatGPT”，网页会显示一次性设备验证码，不再启动依赖 `localhost` 回调的登录。
+2. 复制验证码，点击页面中的 OpenAI 官方授权链接（`https://auth.openai.com/codex/device`），在自己的浏览器登录 ChatGPT 并输入该验证码。
+3. 返回应用，等待状态自动变为“已连接”。未完成时可以取消；授权失败或验证码失效后重新获取。关闭后重开设置，可以再次获取仍在等待的验证码。
+4. 选择 `gpt-image-2`，创建一个图片节点，先测试纯提示词生图。
+5. 再连接一张参考图测试图片编辑，并确认结果同时出现在画布和素材库。
+6. 创建视频节点，确认它仍使用已配置的视频渠道；Codex 订阅不会出现在视频模型选择中。
+7. 点击“断开连接”，确认普通 API 渠道仍可使用。
+8. 如需检查凭据边界，可查看浏览器 `localStorage` 与 IndexedDB：其中不应出现 ChatGPT OAuth token 或设备验证码。
+
+设备码登录可能需要先在 **ChatGPT 安全设置**（个人账号）或 **工作区权限**（管理员）中启用。若无法获取验证码或授权被拒绝，请检查此设置及服务器到 OpenAI 的网络连接；不会静默回退到不可用的 localhost 登录。验证码只保存在当前页面内存，不写入渠道配置、浏览器存储或备份。只对你信任的部署实例发起授权，因为最终凭据保存在该服务器。
+
+此流程使用固定版本 Codex `0.153.4` 已支持的 `chatgptDeviceCode` App Server 协议，不需要开放 `1455` 端口、配置 OAuth 回调代理、替换回调域名或把本机 OAuth token 上传到网页。官方说明：[远程/无界面登录](https://learn.chatgpt.com/docs/auth)、[App Server 设备码登录](https://learn.chatgpt.com/docs/app-server)。
 
 任务完成或取消后会清理临时图片文件。Codex OAuth 状态由每个用户独立的服务器端 `CODEX_HOME` 持久化，浏览器端不需要配置 API Key。
 
@@ -172,7 +178,7 @@ npm run build
 ATELIER_DATA_DIR=/var/lib/infinite-atelier npm start
 ```
 
-`npm start` 会通过 `vite preview` 同时提供构建后的页面和 `/api/codex-subscription` 接口，并监听 `0.0.0.0:3000`。用户在远程页面点击“连接 ChatGPT”后，在自己的浏览器完成 OAuth；登录状态保存在数据目录的 `codex/<user-id>`。应用不会复用主机上全局的 Codex 登录状态；升级后请在当前应用账号内重新连接 ChatGPT。远程主机必须能直接执行 `codex`，且应使用 HTTPS 和持久化磁盘。
+`npm start` 会通过 `vite preview` 同时提供构建后的页面和 `/api/codex-subscription` 接口，并监听 `0.0.0.0:3000`。用户在远程页面获取设备码后，在自己的浏览器完成 OpenAI 官方授权；服务器上的 Codex 负责接收授权结果，登录状态保存在数据目录的 `codex/<user-id>`。应用不会复用主机上全局的 Codex 登录状态；升级后请在当前应用账号内重新连接 ChatGPT。远程主机必须能直接执行 `codex`，且应使用 HTTPS 和持久化磁盘。
 
 当前模式支持单机内多账号隔离，但不支持多副本共享 SQLite 或多人同时编辑同一项目。请在 HTTPS 反向代理后部署，限制公开注册并定期备份。Codex client/任务和文件目录按用户独立；同时驻留连接上限为 16，达到上限需重启实例释放连接。
 
@@ -180,7 +186,7 @@ ATELIER_DATA_DIR=/var/lib/infinite-atelier npm start
 
 ## Docker 部署（Codex 订阅）
 
-Docker 镜像包含构建后的 Infinite Atelier、Codex CLI、用户系统和生成接口。服务名为 `atelier`，默认只绑定本机 `127.0.0.1:3000`。所有账号数据保存在 `atelier-data` 卷的 `/data`；Codex 登录凭据按应用账号位于 `/data/codex/<user-id>`，不再共享一个全局登录。
+Docker 镜像包含构建后的 Infinite Atelier、Codex CLI、系统 CA 根证书、用户系统和生成接口。服务名为 `atelier`，默认只绑定本机 `127.0.0.1:3000`。所有账号数据保存在 `atelier-data` 卷的 `/data`；Codex 登录凭据按应用账号位于 `/data/codex/<user-id>`，不再共享一个全局登录。
 
 ### 本地构建与启动
 
@@ -193,7 +199,7 @@ docker compose up -d
 docker compose logs -f atelier
 ```
 
-打开 `http://127.0.0.1:3000` 后先注册或登录应用账号，再到配置 → 渠道 → Codex 订阅中点击“连接 ChatGPT”。浏览器不需要填写 ChatGPT OAuth token；凭据由该账号的服务器端 Codex CLI 管理。
+打开 `http://127.0.0.1:3000` 后先注册或登录应用账号，再到配置 → 渠道 → Codex 订阅中点击“连接 ChatGPT”，按上面的设备码流程授权。浏览器不需要填写 ChatGPT OAuth token；凭据由该账号的服务器端 Codex CLI 管理。
 
 ```bash
 docker compose down       # 停止并移除容器，保留持久卷
@@ -201,6 +207,14 @@ docker compose up -d      # 使用原卷重新启动
 ```
 
 **不要执行 `docker compose down -v`：它会删除账号、画布、媒体、加密密钥和 OAuth 凭据，而不只是退出登录。** 升级前先备份完整 `atelier-data`，再拉取/构建镜像并重建容器。
+
+### 登录仍跳转 localhost 时
+
+旧版使用本机浏览器 OAuth 回调，远程 Docker 下该 localhost 指向浏览器所在电脑，而非服务器。更新到包含设备码修复的镜像并重建应用容器，保持原 `atelier-data` 挂载不变，然后重新加载页面；仅修改域名或转发 `1455` 端口不是本应用的修复方式。前后端应使用同一版本，不要混用旧前端资源。
+
+**若获取设备码时报 HTTPS/连接错误：** 原生 Codex CLI 需要系统 CA 根证书；Node 自带证书，因此 Node HTTPS 成功不代表 Codex 的 TLS 可用。当前镜像在运行阶段安装 `ca-certificates`，容器验收也检查该信任库。使用更新镜像重建容器，不要通过关闭 TLS 校验来绕过问题。企业 TLS 代理如使用私有 CA，应按官方文档配置额外可信证书。
+
+`ATELIER_PUBLIC_URL` 仍须与应用的实际外部访问地址一致，用于应用账号的同源/CSRF 校验；它不用于重写 ChatGPT OAuth 回调。不要因此关闭同源校验或清空数据卷。
 
 ### 从旧版 `codex-data` 升级
 

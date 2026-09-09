@@ -13,6 +13,7 @@ import { CodexAppServerClient } from "./app-server-client.mjs";
 import { createBridgeServer } from "./server.mjs";
 
 const SECRET = "test-bridge-secret";
+const DEVICE_LOGIN = { type: "chatgptDeviceCode", loginId: "login-1", verificationUrl: "https://auth.openai.com/codex/device", userCode: "ABCD-1234" };
 const PNG_BYTES = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 test("Codex client initializes once and sends documented image turn inputs", { timeout: 500 }, async () => {
@@ -28,7 +29,7 @@ test("Codex client initializes once and sends documented image turn inputs", { t
     });
 
     assert.deepEqual(account, { account: null, requiresOpenaiAuth: true });
-    assert.deepEqual(login, { authUrl: "https://chatgpt.com/auth/test" });
+    assert.deepEqual(login, DEVICE_LOGIN);
     assert.deepEqual(generated.files[0].bytes, PNG_BYTES);
     assert.equal(generated.files[0].mimeType, "image/png");
 
@@ -48,9 +49,7 @@ test("Codex client initializes once and sends documented image turn inputs", { t
     });
     assert.deepEqual(process.messages[1], { method: "initialized", params: {} });
     assert.deepEqual(requests[2].params, {
-        type: "chatgpt",
-        useHostedLoginSuccessPage: true,
-        appBrand: "codex",
+        type: "chatgptDeviceCode",
     });
     assert.equal(requests[3].params.sandbox, "workspace-write");
     assert.deepEqual(requests[4].params.input, [
@@ -66,7 +65,7 @@ test("Codex client tracks ChatGPT OAuth completion notifications", async () => {
     const client = new CodexAppServerClient({ spawnProcess: () => process });
 
     await client.login();
-    assert.equal(client.accountStatus, "disconnected");
+    assert.equal(client.accountStatus, "connecting");
 
     process.stdout.write(
         `${JSON.stringify({
@@ -83,8 +82,8 @@ test("Codex client tracks ChatGPT OAuth completion notifications", async () => {
             params: { loginId: "login-1", success: false, error: "cancelled", onboardingEntrypoint: null },
         })}\n`,
     );
-    await waitUntil(() => client.accountStatus === "disconnected");
-    assert.equal(client.accountStatus, "disconnected");
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(client.accountStatus, "connected", "stale completion must not replace a completed attempt");
     await client.close();
 });
 
@@ -613,7 +612,7 @@ test("starts ChatGPT login and logs out through Codex", async () => {
     const codex = {
         status: "disconnected",
         async login() {
-            return { authUrl: "https://chatgpt.com/auth/test" };
+            return DEVICE_LOGIN;
         },
         async logout() {},
     };
@@ -621,7 +620,7 @@ test("starts ChatGPT login and logs out through Codex", async () => {
     await withServer(codex, async ({ request }) => {
         const login = await request("/v1/login", { method: "POST", body: "{}" });
         assert.equal(login.status, 200);
-        assert.deepEqual(await login.json(), { authUrl: "https://chatgpt.com/auth/test" });
+        assert.deepEqual(await login.json(), DEVICE_LOGIN);
 
         const logout = await request("/v1/logout", { method: "POST", body: "{}" });
         assert.equal(logout.status, 204);
@@ -705,9 +704,7 @@ function createFakeAppServerProcess({ completeTurn = true, imageItem } = {}) {
                 respond({
                     id: message.id,
                     result: {
-                        type: "chatgpt",
-                        loginId: "login-1",
-                        authUrl: "https://chatgpt.com/auth/test",
+                        ...DEVICE_LOGIN,
                     },
                 });
             } else if (message.method === "account/logout") {
