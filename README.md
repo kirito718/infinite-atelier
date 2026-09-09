@@ -114,6 +114,29 @@ docker compose up -d --build
 docker compose logs -f atelier
 ```
 
+通过域名或 HTTPS 反向代理访问时，启动前在 **`compose.yaml` 同目录的 `.env`** 设置浏览器实际访问的来源地址：
+
+```dotenv
+ATELIER_PUBLIC_URL=https://atelier.example.com
+```
+
+将示例替换为地址栏中的实际协议、域名和端口（如 `https://atelier.example.com:8443`），不要带页面路径，不要填写容器内部地址 `http://atelier:3000`。HTTPS 地址自动启用 Secure Cookie。Docker Compose 使用根目录 `.env`；`web/.env` 用于直接运行 Node 的部署。
+
+#### 登录或注册提示“不允许跨站修改数据”
+
+该提示表示请求没有通过同源校验。常见原因是反向代理对外提供 HTTPS，而容器收到 HTTP 请求；未设置 `ATELIER_PUBLIC_URL` 时，服务会以收到的 HTTP Host 校验浏览器的 Origin。配置值与实际访问的协议、域名或端口不一致也会导致拒绝。
+
+修改原部署目录的 `.env` 后，在同一目录执行以下命令，将配置应用到现有服务并保留数据卷和现有镜像：
+
+```bash
+docker compose up -d --no-deps --force-recreate --no-build --pull never atelier
+docker compose exec -T atelier printenv ATELIER_PUBLIC_URL
+```
+
+最后一条命令应输出浏览器实际访问的来源地址。仅执行 `docker compose restart` 不会更新容器环境变量；若使用额外 Compose 文件或部署面板，也要在同一个部署配置中设置并重新创建容器。随后刷新页面重试登录或注册。
+
+若配置已匹配但仍报错，检查浏览器该请求的 `Origin` 是否一致，以及反向代理是否保留这些请求标头。服务仍会拒绝 `Sec-Fetch-Site: cross-site` 请求；不要删除来源标头、放开任意 Origin 或关闭同源校验来规避错误。无需清空账号或浏览器数据，也不要执行 `docker compose down -v`。
+
 `atelier-data` 命名卷挂载到 `/data`，容器重建/升级会保留账号和内容。镜像以非 root 用户运行，包含当前固定版本的 Codex CLI。**不要运行 `docker compose down -v`，这会删除数据卷。** 服务启动前会拒绝位于 `web/public`、构建后的 `dist` 或指向它们的符号链接下的数据目录。
 
 一致备份：停止应用（`docker compose stop atelier`），将完整 `/data` 复制或归档到受限备份目录，再启动应用。恢复时先停止服务并备份现有目录，然后恢复与数据库配对的密钥、媒体和 Codex 子目录，确保容器用户 UID 1000 可读写，再启动。不要在服务运行时只复制 SQLite 主文件；WAL 中可能仍有已提交数据。备份包含用户内容和凭据，应设置访问权限并加密保存。丢失加密密钥无法解密数据库，服务会拒绝使用错误的新密钥。
