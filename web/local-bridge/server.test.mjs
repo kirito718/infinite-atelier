@@ -60,6 +60,17 @@ test("Codex client initializes once and sends documented image turn inputs", { t
     await client.close();
 });
 
+test("Codex client reads image output included in the completed turn payload", async () => {
+    const process = createFakeAppServerProcess({ emitImageItemNotification: false, includeImageItemInTurn: true });
+    const client = new CodexAppServerClient({ spawnProcess: () => process });
+
+    const generated = await client.generateImage({ prompt: "Use the completed turn image", references: [], workDir: "/tmp/task" });
+
+    assert.deepEqual(generated.files[0].bytes, PNG_BYTES);
+    assert.equal(generated.files[0].mimeType, "image/png");
+    await client.close();
+});
+
 test("Codex client tracks ChatGPT OAuth completion notifications", async () => {
     const process = createFakeAppServerProcess();
     const client = new CodexAppServerClient({ spawnProcess: () => process });
@@ -674,7 +685,7 @@ async function waitForTerminalTask(request, taskId) {
     assert.fail(`Task ${taskId} did not reach a terminal state`);
 }
 
-function createFakeAppServerProcess({ completeTurn = true, imageItem } = {}) {
+function createFakeAppServerProcess({ completeTurn = true, imageItem, emitImageItemNotification = true, includeImageItemInTurn = false } = {}) {
     const child = new EventEmitter();
     child.stdin = new PassThrough();
     child.stdout = new PassThrough();
@@ -719,31 +730,30 @@ function createFakeAppServerProcess({ completeTurn = true, imageItem } = {}) {
                     });
                     continue;
                 }
+                const generatedImage = imageItem ?? {
+                    type: "imageGeneration",
+                    id: "image-1",
+                    status: "completed",
+                    revisedPrompt: null,
+                    result: `data:image/png;base64,${PNG_BYTES.toString("base64")}`,
+                    failure: null,
+                };
                 const messages = [
                     {
                         id: message.id,
                         result: { turn: { id: "turn-1", status: "inProgress", items: [], error: null } },
                     },
-                    {
-                        method: "item/completed",
-                        params: {
-                            threadId: "thread-1",
-                            turnId: "turn-1",
-                            item: imageItem ?? {
-                                type: "imageGeneration",
-                                id: "image-1",
-                                status: "completed",
-                                revisedPrompt: null,
-                                result: `data:image/png;base64,${PNG_BYTES.toString("base64")}`,
-                                failure: null,
-                            },
-                        },
-                    },
+                    ...(emitImageItemNotification
+                        ? [{
+                              method: "item/completed",
+                              params: { threadId: "thread-1", turnId: "turn-1", item: generatedImage },
+                          }]
+                        : []),
                     {
                         method: "turn/completed",
                         params: {
                             threadId: "thread-1",
-                            turn: { id: "turn-1", status: "completed", items: [], error: null },
+                            turn: { id: "turn-1", status: "completed", items: includeImageItemInTurn ? [generatedImage] : [], error: null },
                         },
                     },
                 ];

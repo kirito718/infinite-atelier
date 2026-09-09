@@ -363,7 +363,7 @@ export class CodexAppServerClient extends EventEmitter {
         if (method === "item/completed" && params.item?.type === "imageGeneration") {
             const key = turnKey(params.threadId, params.turnId);
             const turn = this.turns.get(key) ?? this.earlyTurns.get(key) ?? { imageItems: [] };
-            turn.imageItems.push(params.item);
+            appendImageItem(turn, params.item);
             if (!this.turns.has(key)) this.earlyTurns.set(key, turn);
             return;
         }
@@ -371,6 +371,7 @@ export class CodexAppServerClient extends EventEmitter {
         if (method === "turn/completed") {
             const key = turnKey(params.threadId, params.turn?.id);
             const turn = this.turns.get(key) ?? this.earlyTurns.get(key) ?? { imageItems: [] };
+            for (const item of params.turn?.items || []) appendImageItem(turn, item);
             turn.completed = params.turn;
             if (this.turns.has(key)) this.finishTurn(key, turn);
             else this.earlyTurns.set(key, turn);
@@ -441,6 +442,11 @@ export class CodexAppServerClient extends EventEmitter {
         for (const pending of this.pending.values()) pending.reject(bridgeError(error));
         this.pending.clear();
     }
+}
+
+function appendImageItem(turn, item) {
+    if (item?.type !== "imageGeneration" || turn.imageItems.some((candidate) => candidate.id === item.id)) return;
+    turn.imageItems.push(item);
 }
 
 export function createCodexAppServerClient(options) {
