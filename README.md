@@ -163,7 +163,7 @@ ATELIER_DATA_DIR=/var/lib/infinite-atelier npm start
 
 ## Docker 部署（Codex 订阅）
 
-Docker 镜像包含构建后的 Infinite Atelier、Codex CLI、用户系统和生成接口。服务名为 `atelier`，默认只绑定本机 `127.0.0.1:3000`。所有账号数据保存在 `atelier-data` 卷的 `/data`；Codex 登录凭据按应用账号位于 `/data/codex/<user-id>`，不再共享一个全局登录。
+Docker 镜像包含构建后的 Infinite Atelier、Codex CLI、系统 CA 根证书、用户系统和生成接口。服务名为 `atelier`，默认只绑定本机 `127.0.0.1:3000`。所有账号数据保存在 `atelier-data` 卷的 `/data`；Codex 登录凭据按应用账号位于 `/data/codex/<user-id>`，不再共享一个全局登录。
 
 ### 本地构建与启动
 
@@ -188,6 +188,8 @@ docker compose up -d      # 使用原卷重新启动
 ### 登录仍跳转 localhost 时
 
 旧版使用本机浏览器 OAuth 回调，远程 Docker 下该 localhost 指向浏览器所在电脑，而非服务器。更新到包含设备码修复的镜像并重建应用容器，保持原 `atelier-data` 挂载不变，然后重新加载页面；仅修改域名或转发 `1455` 端口不是本应用的修复方式。前后端应使用同一版本，不要混用旧前端资源。
+
+**若获取设备码时报 HTTPS/连接错误：** 原生 Codex CLI 需要系统 CA 根证书；Node 自带证书，因此 Node HTTPS 成功不代表 Codex 的 TLS 可用。当前镜像在运行阶段安装 `ca-certificates`，容器验收也检查该信任库。使用更新镜像重建容器，不要通过关闭 TLS 校验来绕过问题。企业 TLS 代理如使用私有 CA，应按官方文档配置额外可信证书。
 
 `ATELIER_PUBLIC_URL` 仍须与应用的实际外部访问地址一致，用于应用账号的同源/CSRF 校验；它不用于重写 ChatGPT OAuth 回调。不要因此关闭同源校验或清空数据卷。
 

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import test from "node:test";
-import { cleanupProject, composeArgs, gatedFetch, parseOptions, runProcess, safeDiagnostic, testEnvironment, verifyCompose, verifyContainerEnvironment, verifyResource } from "./verify-container.mjs";
+import { cleanupProject, composeArgs, gatedFetch, parseOptions, runProcess, safeDiagnostic, testEnvironment, verifyCompose, verifyContainerEnvironment, verifyNativeTls, verifyResource } from "./verify-container.mjs";
 
 const project = "atelier-acceptance-unit-0123456789abcdef";
 const paths = { root: "/project with spaces", project, envFile: "/test dir/acceptance.env" };
@@ -550,4 +550,11 @@ test("effective container environment verifies both account and ComfyUI settings
             expected,
         ),
     );
+});
+
+test("native Codex TLS requires a readable system CA bundle, not just Node HTTPS", () => {
+    assert.doesNotThrow(() => verifyNativeTls({ caCertificates: 1 }));
+    for (const evidence of [{}, { caCertificates: 0 }, { caCertificates: -1 }, { caCertificates: "1" }]) {
+        assert.throws(() => verifyNativeTls(evidence), /system CA bundle/);
+    }
 });
