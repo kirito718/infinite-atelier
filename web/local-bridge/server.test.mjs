@@ -71,6 +71,28 @@ test("Codex client reads image output included in the completed turn payload", a
     await client.close();
 });
 
+test("Codex client decodes a raw base64 image result without a saved path", async () => {
+    const process = createFakeAppServerProcess({
+        emitImageItemNotification: false,
+        includeImageItemInTurn: true,
+        imageItem: {
+            type: "imageGeneration",
+            id: "image-raw-base64",
+            status: "completed",
+            revisedPrompt: null,
+            result: PNG_BYTES.toString("base64"),
+            failure: null,
+        },
+    });
+    const client = new CodexAppServerClient({ spawnProcess: () => process });
+
+    const generated = await client.generateImage({ prompt: "Decode the raw image", references: [], workDir: "/tmp/task" });
+
+    assert.deepEqual(generated.files[0].bytes, PNG_BYTES);
+    assert.equal(generated.files[0].mimeType, "image/png");
+    await client.close();
+});
+
 test("Codex client tracks ChatGPT OAuth completion notifications", async () => {
     const process = createFakeAppServerProcess();
     const client = new CodexAppServerClient({ spawnProcess: () => process });
