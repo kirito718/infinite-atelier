@@ -8,7 +8,7 @@ Official documentation fetched on 2026-09-09:
 - https://learn.chatgpt.com/docs/auth — recommends device-code auth for headless/remote environments; users or workspace admins may need to enable it.
 - https://learn.chatgpt.com/docs/app-server — managed `chatgptDeviceCode` login, completion notification, and cancellation by `loginId`.
 
-The installed **Codex 0.153.4**, matching the Docker pin, was checked using offline `app-server generate-json-schema` with an empty temporary CODEX_HOME. It supports the documented device-code request and response. No real OAuth login was initiated.
+The installed **Codex 0.153.4**, matching the Docker pin, was checked using offline `app-server generate-json-schema` with an empty temporary CODEX_HOME. It supports the documented device-code request and response. No real OAuth login was initiated during that schema check. The final audit additionally obtains and immediately cancels an official device code in an isolated empty home, without account authorization or code disclosure.
 
 ## Design
 
@@ -23,3 +23,7 @@ The installed **Codex 0.153.4**, matching the Docker pin, was checked using offl
 ## Acceptance
 
 Protocol, HTTP, client/UI and account-isolation regressions pass; typecheck and production build pass. Browser smoke verifies the device-code UI with deterministic fake transport only. Real ChatGPT account authorization remains a user action, not an automated test.
+
+### Verified runtime prerequisites
+
+The Docker runtime includes the system CA trust store required by the native CLI; Node HTTPS alone is not sufficient evidence. Initialization/account RPCs have a default 60-second deadline that closes the failed owned transport and permits retry; the user's device-code authorization wait and generation RPCs are not given that short deadline. See the final acceptance audit for exact image and live-probe evidence.

@@ -1,6 +1,6 @@
 # Codex device-code login repair Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make browser-initiated ChatGPT login work against a remote Docker deployment without a localhost callback.
 
@@ -13,7 +13,7 @@
 ## Global constraints
 
 - Keep CODEX_CLI_VERSION=0.153.4 and all account/CSRF/storage isolation.
-- No real OAuth requests, token copying, browser-storage persistence of verification codes, callback port exposure, or paid generation during verification.
+- No real account authorization, token copying, browser-storage persistence of verification codes, callback port exposure, or paid generation. The follow-up completion audit additionally permits an isolated real device-code request immediately cancelled without submitting/disclosing the code.
 - Work on `fix/codex-device-login` in the existing checkout; do not modify other worktrees.
 - Backend and frontend worker file sets are disjoint. Do not stage or commit each other's unfinished changes.
 
@@ -48,3 +48,12 @@
 - [x] Record exact results and leave deployment/publication separate from this requested code change.
 
 Verification record: `docs/superpowers/verification/2026-09-09-codex-device-login.md`. Publication and real account authorization remain outside this change.
+
+## Follow-up acceptance closure
+
+- [x] Bound unresponsive auth RPCs and verify safe retry/cleanup.
+- [x] Verify actual Docker + HTTPS + account API + stdio wiring, not only intercepted browser responses.
+- [x] Correct helper-text contrast using the existing semantic token; verify both themes and a narrow bilingual view.
+- [x] Add runtime CA certificates, reject the old image without them, and verify a real native device-code request/cancel on the rebuilt image.
+
+Final evidence: `docs/superpowers/verification/2026-09-09-device-login-final-audit.md`.

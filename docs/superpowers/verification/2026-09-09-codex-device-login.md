@@ -1,4 +1,6 @@
-# Remote Codex device-code login verification — 2026-09-09
+# Remote Codex device-code login verification — initial 2026-09-09 pass
+
+The stronger follow-up audit and final status are in [the completion audit](2026-09-09-device-login-final-audit.md). Counts and limitations below describe the initial pass, not the final image.
 
 ## Scope
 
