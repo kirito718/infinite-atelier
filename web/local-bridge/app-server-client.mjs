@@ -501,8 +501,22 @@ function isContained(directory, path) {
 function decodeImageData(value) {
     if (typeof value !== "string") return null;
     const match = /^data:(image\/[a-z0-9.+-]+);base64,([a-z0-9+/=\s]+)$/i.exec(value);
-    if (!match) return null;
-    return { mimeType: match[1].toLowerCase(), bytes: Buffer.from(match[2], "base64") };
+    if (match) return { mimeType: match[1].toLowerCase(), bytes: Buffer.from(match[2], "base64") };
+
+    const encoded = value.replace(/\s+/g, "");
+    if (!/^[a-z0-9+/]+={0,2}$/i.test(encoded) || encoded.length % 4 === 1) return null;
+    const bytes = Buffer.from(encoded, "base64");
+    const mimeType = detectImageMime(bytes);
+    return mimeType ? { mimeType, bytes } : null;
+}
+
+function detectImageMime(bytes) {
+    if (bytes.length >= 8 && bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return "image/png";
+    if (bytes.length >= 3 && bytes.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff]))) return "image/jpeg";
+    if (bytes.length >= 6 && ["GIF87a", "GIF89a"].includes(bytes.subarray(0, 6).toString("ascii"))) return "image/gif";
+    if (bytes.length >= 12 && bytes.subarray(0, 4).toString("ascii") === "RIFF" && bytes.subarray(8, 12).toString("ascii") === "WEBP") return "image/webp";
+    if (bytes.length >= 12 && bytes.subarray(4, 8).toString("ascii") === "ftyp" && ["avif", "avis"].includes(bytes.subarray(8, 12).toString("ascii"))) return "image/avif";
+    return null;
 }
 
 function mimeTypeForPath(path) {
