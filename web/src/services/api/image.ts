@@ -143,6 +143,10 @@ function isDalleModel(model: string) {
     return value.startsWith("dall-e") || value.startsWith("dalle");
 }
 
+function isXaiImagineImageModel(model: string) {
+    return model.trim().toLowerCase().startsWith("grok-imagine-image");
+}
+
 function resolveOpenAiImageParams(config: AiConfig, count: number) {
     const quality = normalizeQuality(config.quality);
     const requestSize = resolveRequestSize(quality, config.size);
@@ -852,6 +856,26 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
         if (mask) throw new Error(apiText("geminiMaskUnsupported"));
         try {
             return await requestGeminiImages(requestConfig, requestPrompt, references, n, options);
+        } catch (error) {
+            throw new Error(readAxiosError(error, apiText("requestFailed")));
+        }
+    }
+
+    if (isXaiImagineImageModel(requestConfig.model)) {
+        const imageUrls = await Promise.all(references.map(imageToDataUrl));
+        const body = {
+            model: requestConfig.model,
+            prompt: withSystemPrompt(requestConfig, requestPrompt),
+            ...(imageUrls.length === 1 ? { image: { type: "image_url", url: imageUrls[0] } } : { images: imageUrls.map((url) => ({ type: "image_url", url })) }),
+            ...(normalizeQuality(requestConfig.quality) && ["low", "medium"].includes(normalizeQuality(requestConfig.quality)!) ? { quality: normalizeQuality(requestConfig.quality) } : {}),
+            ...(requestConfig.size.trim().includes(":") && requestConfig.size.trim().toLowerCase() !== "auto" ? { aspect_ratio: requestConfig.size.trim() } : {}),
+        };
+        try {
+            const response = await axios.post<ImageApiResponse>(aiApiUrl(requestConfig, "/images/edits"), body, {
+                headers: aiHeaders(requestConfig, "application/json"),
+                signal: options?.signal,
+            });
+            return parseImagePayload(response.data);
         } catch (error) {
             throw new Error(readAxiosError(error, apiText("requestFailed")));
         }
