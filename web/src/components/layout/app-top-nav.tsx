@@ -42,7 +42,6 @@ export function AppTopNav() {
                             >
                                 <Menu className="size-5" />
                             </button>
-
                         </div>
 
                         <div className="my-auto flex h-9 min-w-0 items-center justify-end gap-2 justify-self-end whitespace-nowrap">

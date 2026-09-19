@@ -40,11 +40,15 @@ export function MobileNavDrawer({ open, activeToolSlug, onClose }: MobileNavDraw
         <Drawer title={t("topNav.navigation")} placement="left" size={280} open={open} onClose={onClose} className="md:hidden">
             <div className="space-y-6">
                 <section aria-labelledby="mobile-workspace-nav">
-                    <h2 id="mobile-workspace-nav" className="mb-2 px-3 text-xs font-semibold uppercase tracking-[0.16em] text-stone-400">{t("topNav.workspace")}</h2>
+                    <h2 id="mobile-workspace-nav" className="mb-2 px-3 text-xs font-semibold uppercase tracking-[0.16em] text-stone-400">
+                        {t("topNav.workspace")}
+                    </h2>
                     <div className="space-y-1">{workspaceTools.map(renderTool)}</div>
                 </section>
                 <section aria-labelledby="mobile-system-nav">
-                    <h2 id="mobile-system-nav" className="mb-2 px-3 text-xs font-semibold uppercase tracking-[0.16em] text-stone-400">{t("topNav.system")}</h2>
+                    <h2 id="mobile-system-nav" className="mb-2 px-3 text-xs font-semibold uppercase tracking-[0.16em] text-stone-400">
+                        {t("topNav.system")}
+                    </h2>
                     <div className="space-y-1">{systemTools.map(renderTool)}</div>
                 </section>
             </div>

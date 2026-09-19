@@ -9,8 +9,8 @@ const project = (id: string, updatedAt: string, nodes = 0, connections = 0): Can
     title: id,
     createdAt: updatedAt,
     updatedAt,
-    nodes: Array.from({ length: nodes }, (_, index) => ({ id: `${id}-node-${index}` } as CanvasProject["nodes"][number])),
-    connections: Array.from({ length: connections }, (_, index) => ({ id: `${id}-connection-${index}` } as CanvasProject["connections"][number])),
+    nodes: Array.from({ length: nodes }, (_, index) => ({ id: `${id}-node-${index}` }) as CanvasProject["nodes"][number]),
+    connections: Array.from({ length: connections }, (_, index) => ({ id: `${id}-connection-${index}` }) as CanvasProject["connections"][number]),
     chatSessions: [],
     activeChatId: null,
     backgroundMode: "lines",
@@ -20,12 +20,7 @@ const project = (id: string, updatedAt: string, nodes = 0, connections = 0): Can
 
 describe("getRecentProjects", () => {
     it("sorts newest first, limits to three, and preserves input order", () => {
-        const source = [
-            project("old", "2026-06-10T00:00:00.000Z"),
-            project("newest", "2026-06-19T00:00:00.000Z"),
-            project("middle", "2026-06-15T00:00:00.000Z"),
-            project("fourth", "2026-06-12T00:00:00.000Z"),
-        ];
+        const source = [project("old", "2026-06-10T00:00:00.000Z"), project("newest", "2026-06-19T00:00:00.000Z"), project("middle", "2026-06-15T00:00:00.000Z"), project("fourth", "2026-06-12T00:00:00.000Z")];
 
         expect(getRecentProjects(source).map(({ id }) => id)).toEqual(["newest", "middle", "fourth"]);
         expect(source.map(({ id }) => id)).toEqual(["old", "newest", "middle", "fourth"]);

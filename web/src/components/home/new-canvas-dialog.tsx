@@ -44,7 +44,9 @@ export function NewCanvasDialog({ open, onClose, onCreateBlank, onImportReferenc
                         onClick={handlers[key]}
                         className={`group flex w-full items-center gap-4 rounded-xl border px-4 py-4 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#e5543f]/30 ${index === 0 ? "border-[#e5543f]/50 bg-[#f4d8d2] hover:border-[#e5543f] dark:bg-[#5a2c25]" : "border-stone-200 bg-[#f3f1ec] hover:border-stone-300 dark:border-stone-800 dark:bg-stone-900 dark:hover:border-stone-700"}`}
                     >
-                        <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-white text-[#e5543f] shadow-sm dark:bg-stone-950"><Icon className="size-5" /></span>
+                        <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-white text-[#e5543f] shadow-sm dark:bg-stone-950">
+                            <Icon className="size-5" />
+                        </span>
                         <span className="min-w-0 flex-1">
                             <span className="block text-sm font-bold text-stone-900 dark:text-stone-100">{t(`home.newCanvasDialog.options.${key}.title`)}</span>
                             <span className="mt-1 block text-xs text-stone-500 dark:text-stone-400">{t(`home.newCanvasDialog.options.${key}.description`)}</span>

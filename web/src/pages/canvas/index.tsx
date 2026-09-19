@@ -37,7 +37,16 @@ export default function CanvasPage() {
                     <div className="flex items-center gap-2">
                         {selectedIds.length ? (
                             <>
-                                <Button disabled={!hydrated} icon={<Download className="size-4" />} onClick={() => void exportCanvasProjects(projects.filter((project) => selectedIds.includes(project.id)), `${t("canvas.title")}-${selectedIds.length}`)}>
+                                <Button
+                                    disabled={!hydrated}
+                                    icon={<Download className="size-4" />}
+                                    onClick={() =>
+                                        void exportCanvasProjects(
+                                            projects.filter((project) => selectedIds.includes(project.id)),
+                                            `${t("canvas.title")}-${selectedIds.length}`,
+                                        )
+                                    }
+                                >
                                     {t("canvas.exportSelected")}
                                 </Button>
                                 <Button disabled={!hydrated} onClick={() => setDeleteIds(selectedIds)}>
