@@ -713,12 +713,16 @@ export default {
         },
     },
     navigation: {
-        canvas: "My Canvases",
+        canvas: "Canvas",
         director: "Director",
-        assets: "My Assets",
+        assets: "Assets",
         config: "Settings",
     },
     topNav: {
+        workspace: "Workspace",
+        system: "System",
+        createCanvas: "Create canvas",
+        accountStatus: "Local-first",
         openMenu: "Open navigation menu",
         menu: "Navigation menu",
         navigation: "Navigation",
