@@ -1,26 +1,23 @@
-import { useAccountAction } from "@/hooks/use-account-action";
-import { useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { App, Button } from "antd";
+import { Button } from "antd";
 import { Download, FileUp, Plus } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import { readCanvasPackage } from "@/services/account-archive-import";
 import { CanvasDeleteProjectsDialog } from "@/components/canvas/canvas-delete-projects-dialog";
 import { CanvasProjectCard } from "@/components/canvas/canvas-project-card";
+import { useAccountAction } from "@/hooks/use-account-action";
+import { useCanvasArchiveImport } from "@/hooks/use-canvas-archive-import";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { useCanvasUiStore } from "@/stores/canvas/use-canvas-ui-store";
 import { exportCanvasProjects } from "@/lib/canvas/canvas-export";
 
 export default function CanvasPage() {
-    const { message } = App.useApp();
     const { t } = useTranslation();
     const navigate = useNavigate();
-    const inputRef = useRef<HTMLInputElement>(null);
+    const { inputRef, openImport, importCanvas } = useCanvasArchiveImport();
     const hydrated = useCanvasStore((state) => state.hydrated);
     const projects = useCanvasStore((state) => state.projects);
     const createProject = useAccountAction(useCanvasStore((state) => state.createProject));
-    const importProject = useAccountAction(useCanvasStore((state) => state.importProject));
     const selectedIds = useCanvasUiStore((state) => state.selectedProjectIds);
     const setDeleteIds = useCanvasUiStore((state) => state.setDeleteProjectIds);
 
@@ -28,18 +25,6 @@ export default function CanvasPage() {
         navigate(`/canvas/${id}`);
     };
     const createAndEnter = () => enterProject(createProject(t("canvas.defaultTitle", { count: projects.length + 1 })));
-    const importCanvas = async (file?: File) => {
-        if (!file) return;
-        try {
-            const importedProjects = await readCanvasPackage(file);
-            importedProjects.forEach((project) => importProject(project));
-            message.success(t("canvas.imported", { count: importedProjects.length }));
-        } catch {
-            message.error(t("canvas.importFailed"));
-        } finally {
-            if (inputRef.current) inputRef.current.value = "";
-        }
-    };
 
     return (
         <main className="h-full overflow-auto bg-background text-stone-950 dark:text-stone-100">
@@ -65,7 +50,7 @@ export default function CanvasPage() {
                                 {t("canvas.deleteAll")}
                             </Button>
                         ) : null}
-                        <Button disabled={!hydrated} icon={<FileUp className="size-4" />} onClick={() => inputRef.current?.click()}>
+                        <Button disabled={!hydrated} icon={<FileUp className="size-4" />} onClick={openImport}>
                             {t("canvas.import")}
                         </Button>
                         <Button disabled={!hydrated} type="primary" icon={<Plus className="size-4" />} onClick={createAndEnter}>
