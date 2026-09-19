@@ -390,7 +390,7 @@ Replace the statement that the current task must not change the marketing shell 
 - [ ] **Step 4: Run static style checks**
 
 ```bash
-if rg -n "home-editorial-hero|home-film-grain|home-running-line|home-stage-|home-silk-light|home-display-title" web/src; then exit 1; else echo "no obsolete promotional home selectors"; fi
+if rg -n "home-editorial-hero|home-film-grain|home-running-line-top|home-running-line >|home-stage-|home-silk-light|home-display-title" web/src; then exit 1; else echo "no obsolete promotional home selectors"; fi
 npm run format:check
 ```
 
