@@ -65,7 +65,9 @@ export function AppSideNav() {
                     className="mt-6 flex h-11 items-center justify-center gap-2 rounded-lg bg-[#e5543f] px-4 text-sm font-semibold text-white shadow-[0_8px_20px_rgba(229,84,63,0.18)] transition hover:bg-[#cf4937] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#e5543f]/50 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-stone-950"
                     aria-label={t("topNav.createCanvas")}
                 >
-                    <span className="text-lg leading-none" aria-hidden="true">+</span>
+                    <span className="text-lg leading-none" aria-hidden="true">
+                        +
+                    </span>
                     <span>{t("topNav.createCanvas")}</span>
                 </button>
 

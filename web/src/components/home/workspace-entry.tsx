@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { ArrowRight, ArrowUpRight, ChevronRight, Clock3, FilePlus2, FolderOpen, MoreHorizontal, Search, Sparkles, Upload, X } from "lucide-react";
+import { ArrowRight, ArrowUpRight, ChevronRight, Clock3, FilePlus2, FolderOpen, Search, Sparkles, Upload, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import type { CanvasProject } from "@/stores/canvas/use-canvas-store";
@@ -35,7 +35,9 @@ export function WorkspaceEntry({ hydrated, recentProjects, onOpenNewCanvas, onCr
         return (
             <main className="h-full overflow-y-auto bg-[#f3f1ec] text-stone-950 dark:bg-stone-950 dark:text-stone-100">
                 <div className="mx-auto flex min-h-full w-full max-w-[1480px] items-center justify-center px-6 py-10 lg:px-10">
-                    <p role="status" className="text-sm text-stone-500 dark:text-stone-400">{t("home.loading")}</p>
+                    <p role="status" className="text-sm text-stone-500 dark:text-stone-400">
+                        {t("home.loading")}
+                    </p>
                 </div>
             </main>
         );
@@ -61,17 +63,32 @@ export function WorkspaceEntry({ hydrated, recentProjects, onOpenNewCanvas, onCr
                                 className="min-w-0 flex-1 bg-transparent text-sm text-stone-900 outline-none placeholder:text-stone-400 dark:text-stone-100"
                             />
                             {query ? (
-                                <button type="button" onClick={() => setQuery("")} className="rounded p-0.5 text-stone-400 hover:bg-stone-100 hover:text-stone-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-100" aria-label={t("home.clearSearch")}>
+                                <button
+                                    type="button"
+                                    onClick={() => setQuery("")}
+                                    className="rounded p-0.5 text-stone-400 hover:bg-stone-100 hover:text-stone-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-100"
+                                    aria-label={t("home.clearSearch")}
+                                >
                                     <X className="size-3.5" />
                                 </button>
                             ) : null}
                         </label>
-                        <button type="button" onClick={onImportReference} className="inline-flex h-9 items-center gap-2 rounded-lg border border-stone-200 bg-white px-3 text-sm font-semibold text-stone-700 transition hover:border-stone-300 hover:bg-stone-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#e5543f]/30 dark:border-stone-800 dark:bg-stone-900 dark:text-stone-200 dark:hover:bg-stone-800">
+                        <button
+                            type="button"
+                            onClick={onImportReference}
+                            className="inline-flex h-9 items-center gap-2 rounded-lg border border-stone-200 bg-white px-3 text-sm font-semibold text-stone-700 transition hover:border-stone-300 hover:bg-stone-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#e5543f]/30 dark:border-stone-800 dark:bg-stone-900 dark:text-stone-200 dark:hover:bg-stone-800"
+                        >
                             <Upload className="size-4" />
                             {t("home.importReference")}
                         </button>
-                        <button type="button" onClick={onOpenNewCanvas} className="inline-flex h-9 items-center gap-2 rounded-lg bg-[#e5543f] px-3 text-sm font-semibold text-white transition hover:bg-[#cf4937] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#e5543f]/40 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-stone-950">
-                            <span className="text-lg leading-none" aria-hidden="true">+</span>
+                        <button
+                            type="button"
+                            onClick={onOpenNewCanvas}
+                            className="inline-flex h-9 items-center gap-2 rounded-lg bg-[#e5543f] px-3 text-sm font-semibold text-white transition hover:bg-[#cf4937] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#e5543f]/40 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-stone-950"
+                        >
+                            <span className="text-lg leading-none" aria-hidden="true">
+                                +
+                            </span>
                             {t("topNav.createCanvas")}
                         </button>
                     </div>
@@ -88,19 +105,27 @@ export function WorkspaceEntry({ hydrated, recentProjects, onOpenNewCanvas, onCr
                             <Clock3 className="size-4 text-[#e5543f]" />
                             {t("home.recentCanvases")}
                         </h2>
-                        <button type="button" onClick={onOpenCanvasLibrary} className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-sm font-semibold text-stone-500 transition hover:bg-stone-100 hover:text-stone-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-400 dark:text-stone-400 dark:hover:bg-stone-900 dark:hover:text-stone-100">
+                        <button
+                            type="button"
+                            onClick={onOpenCanvasLibrary}
+                            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-sm font-semibold text-stone-500 transition hover:bg-stone-100 hover:text-stone-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-400 dark:text-stone-400 dark:hover:bg-stone-900 dark:hover:text-stone-100"
+                        >
                             {t("home.viewAll")}
                             <ArrowRight className="size-4" />
                         </button>
                     </div>
                     {filteredProjects.length ? (
                         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                            {filteredProjects.map((project, index) => <ProjectCard key={project.id} project={project} index={index} onOpenProject={onOpenProject} locale={i18n.resolvedLanguage} t={t} />)}
+                            {filteredProjects.map((project, index) => (
+                                <ProjectCard key={project.id} project={project} index={index} onOpenProject={onOpenProject} locale={i18n.resolvedLanguage} t={t} />
+                            ))}
                         </div>
                     ) : (
                         <div className="rounded-xl border border-dashed border-stone-300 bg-white/50 px-5 py-10 text-center dark:border-stone-700 dark:bg-stone-900/40">
                             <p className="text-sm font-semibold text-stone-700 dark:text-stone-200">{t("home.noSearchResults")}</p>
-                            <button type="button" onClick={() => setQuery("")} className="mt-3 text-sm font-semibold text-[#e5543f] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#e5543f]/30">{t("home.clearSearch")}</button>
+                            <button type="button" onClick={() => setQuery("")} className="mt-3 text-sm font-semibold text-[#e5543f] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#e5543f]/30">
+                                {t("home.clearSearch")}
+                            </button>
                         </div>
                     )}
                 </section>
@@ -115,15 +140,18 @@ function FeaturedProject({ project, onOpenProject, locale, t }: { project: Canva
         <article className="min-h-[285px] rounded-2xl bg-[#171514] p-6 text-stone-50 shadow-[0_18px_40px_rgba(23,21,20,0.12)] dark:bg-[#24201e]">
             <div className="flex items-center justify-between gap-4 text-[10px] font-bold uppercase tracking-[0.16em] text-[#bbafa4]">
                 <span>{t("home.lastOpened", { date: formatDate(project.updatedAt, locale) })}</span>
-                <button type="button" className="rounded-md p-1 text-[#bbafa4] transition hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60" aria-label={t("home.projectMenu", { name: project.title })} title={t("home.projectMenu", { name: project.title })}>
-                    <MoreHorizontal className="size-4" />
-                </button>
             </div>
-            <h2 id="continue-section-title" className="mt-5 text-2xl font-bold tracking-tight">{project.title}</h2>
+            <h2 id="continue-section-title" className="mt-5 text-2xl font-bold tracking-tight">
+                {project.title}
+            </h2>
             <ProjectPreview variant="featured" />
             <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs text-[#bbafa4]">
                 <span>{t("canvas.project.stats", summary)}</span>
-                <button type="button" onClick={() => onOpenProject(project.id)} className="inline-flex items-center gap-1 rounded-md px-2 py-1 font-semibold text-white transition hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60">
+                <button
+                    type="button"
+                    onClick={() => onOpenProject(project.id)}
+                    className="inline-flex items-center gap-1 rounded-md px-2 py-1 font-semibold text-white transition hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+                >
                     {t("home.openProject")}
                     <ArrowUpRight className="size-4 text-[#e5543f]" />
                 </button>
@@ -136,10 +164,18 @@ function EmptyProject({ onOpenNewCanvas, t }: { onOpenNewCanvas: () => void; t: 
     return (
         <article className="flex min-h-[285px] flex-col justify-center rounded-2xl border border-dashed border-stone-300 bg-white/70 p-6 dark:border-stone-700 dark:bg-stone-900/60">
             <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#e5543f]">{t("home.workspaceEntry")}</p>
-            <h2 id="continue-section-title" className="mt-3 text-2xl font-bold tracking-tight text-stone-950 dark:text-stone-100">{t("home.noProjects")}</h2>
+            <h2 id="continue-section-title" className="mt-3 text-2xl font-bold tracking-tight text-stone-950 dark:text-stone-100">
+                {t("home.noProjects")}
+            </h2>
             <p className="mt-3 max-w-md text-sm leading-6 text-stone-500 dark:text-stone-400">{t("home.emptyDescription")}</p>
-            <button type="button" onClick={onOpenNewCanvas} className="mt-6 inline-flex h-10 w-fit items-center gap-2 rounded-lg bg-[#e5543f] px-4 text-sm font-semibold text-white transition hover:bg-[#cf4937] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#e5543f]/40 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-stone-950">
-                <span className="text-lg leading-none" aria-hidden="true">+</span>
+            <button
+                type="button"
+                onClick={onOpenNewCanvas}
+                className="mt-6 inline-flex h-10 w-fit items-center gap-2 rounded-lg bg-[#e5543f] px-4 text-sm font-semibold text-white transition hover:bg-[#cf4937] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#e5543f]/40 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-stone-950"
+            >
+                <span className="text-lg leading-none" aria-hidden="true">
+                    +
+                </span>
                 {t("topNav.createCanvas")}
             </button>
         </article>
@@ -151,13 +187,22 @@ function QuickStartPanel({ onCreateCanvas, onImportReference, onStartFromPrompt,
     return (
         <section className="rounded-2xl border border-stone-200 bg-white p-5 dark:border-stone-800 dark:bg-stone-900" aria-labelledby="quick-start-title">
             <div className="flex items-center justify-between gap-4">
-                <h2 id="quick-start-title" className="text-lg font-bold text-stone-950 dark:text-stone-100">{t("home.quickStart")}</h2>
+                <h2 id="quick-start-title" className="text-lg font-bold text-stone-950 dark:text-stone-100">
+                    {t("home.quickStart")}
+                </h2>
                 <span className="text-xs text-stone-400">{t("home.quickStartCount", { count: quickStartItems.length })}</span>
             </div>
             <div className="mt-4 space-y-2">
                 {quickStartItems.map(({ key, icon: Icon }) => (
-                    <button key={key} type="button" onClick={handlers[key]} className="group flex w-full items-center gap-3 rounded-xl bg-[#f3f1ec] px-3 py-3 text-left transition hover:bg-[#f4d8d2] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#e5543f]/30 dark:bg-stone-800 dark:hover:bg-[#5a2c25]">
-                        <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-white text-[#e5543f] shadow-sm dark:bg-stone-900"><Icon className="size-4" /></span>
+                    <button
+                        key={key}
+                        type="button"
+                        onClick={handlers[key]}
+                        className="group flex w-full items-center gap-3 rounded-xl bg-[#f3f1ec] px-3 py-3 text-left transition hover:bg-[#f4d8d2] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#e5543f]/30 dark:bg-stone-800 dark:hover:bg-[#5a2c25]"
+                    >
+                        <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-white text-[#e5543f] shadow-sm dark:bg-stone-900">
+                            <Icon className="size-4" />
+                        </span>
                         <span className="min-w-0 flex-1">
                             <span className="block text-sm font-semibold text-stone-800 dark:text-stone-100">{t(`home.quickActions.${key}.title`)}</span>
                             <span className="mt-0.5 block truncate text-xs text-stone-500 dark:text-stone-400">{t(`home.quickActions.${key}.description`)}</span>
@@ -179,9 +224,6 @@ function ProjectCard({ project, index, onOpenProject, locale, t }: { project: Ca
                 <button type="button" onClick={() => onOpenProject(project.id)} className="min-w-0 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#e5543f]/30">
                     <h3 className="truncate text-sm font-bold text-stone-900 dark:text-stone-100">{project.title}</h3>
                     <p className="mt-1 text-xs text-stone-500 dark:text-stone-400">{t("canvas.project.stats", summary)}</p>
-                </button>
-                <button type="button" className="rounded-md p-1 text-stone-400 transition hover:bg-stone-100 hover:text-stone-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-200" aria-label={t("home.projectMenu", { name: project.title })} title={t("home.projectMenu", { name: project.title })}>
-                    <MoreHorizontal className="size-4" />
                 </button>
             </div>
             <div className="mt-auto flex items-center justify-between gap-3 px-1 pt-4 text-[11px] text-stone-400">

@@ -4,22 +4,23 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("react-i18next", () => ({
     useTranslation: () => ({
         i18n: { resolvedLanguage: "zh-CN" },
-        t: (key: string) => ({
-            "home.workspaceEntry": "画布库 / 工作区",
-            "home.continueCreating": "继续创作",
-            "home.searchProjects": "搜索画布",
-            "home.importReference": "导入参考",
-            "topNav.createCanvas": "新建画布",
-            "home.quickStart": "快速开始",
-            "home.quickStartCount": "3 个入口",
-            "home.recentCanvases": "最近画布",
-            "home.viewAll": "查看全部",
-            "home.noProjects": "还没有画布项目",
-            "home.emptyDescription": "从一张干净的无限画布开始。",
-            "home.loading": "正在恢复你的工作区…",
-            "home.noSearchResults": "没有找到匹配的画布",
-            "home.clearSearch": "清除搜索",
-        }[key] || key),
+        t: (key: string) =>
+            ({
+                "home.workspaceEntry": "画布库 / 工作区",
+                "home.continueCreating": "继续创作",
+                "home.searchProjects": "搜索画布",
+                "home.importReference": "导入参考",
+                "topNav.createCanvas": "新建画布",
+                "home.quickStart": "快速开始",
+                "home.quickStartCount": "3 个入口",
+                "home.recentCanvases": "最近画布",
+                "home.viewAll": "查看全部",
+                "home.noProjects": "还没有画布项目",
+                "home.emptyDescription": "从一张干净的无限画布开始。",
+                "home.loading": "正在恢复你的工作区…",
+                "home.noSearchResults": "没有找到匹配的画布",
+                "home.clearSearch": "清除搜索",
+            })[key] || key,
     }),
 }));
 

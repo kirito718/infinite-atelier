@@ -3,26 +3,31 @@ import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("react-router-dom", () => ({
-    Link: ({ to, children, ...props }: { to: string; children: ReactNode }) => <a href={to} {...props}>{children}</a>,
+    Link: ({ to, children, ...props }: { to: string; children: ReactNode }) => (
+        <a href={to} {...props}>
+            {children}
+        </a>
+    ),
     useLocation: () => ({ pathname: "/" }),
     useNavigate: () => vi.fn(),
 }));
 
 vi.mock("react-i18next", () => ({
     useTranslation: () => ({
-        t: (key: string) => ({
-            "topNav.navigation": "导航菜单",
-            "topNav.workspace": "工作区",
-            "topNav.system": "系统",
-            "topNav.createCanvas": "新建画布",
-            "topNav.accountStatus": "本地优先",
-            "meta.title": "Infinite Atelier",
-            "navigation.canvas": "画布",
-            "navigation.director": "导演",
-            "navigation.assets": "资产",
-            "navigation.config": "配置",
-            "canvas.defaultTitle": "未命名画布",
-        }[key] || key),
+        t: (key: string) =>
+            ({
+                "topNav.navigation": "导航菜单",
+                "topNav.workspace": "工作区",
+                "topNav.system": "系统",
+                "topNav.createCanvas": "新建画布",
+                "topNav.accountStatus": "本地优先",
+                "meta.title": "Infinite Atelier",
+                "navigation.canvas": "画布",
+                "navigation.director": "导演",
+                "navigation.assets": "资产",
+                "navigation.config": "配置",
+                "canvas.defaultTitle": "未命名画布",
+            })[key] || key,
     }),
 }));
 
