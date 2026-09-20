@@ -21,17 +21,13 @@ components:
   input: {}
   drawer: {}
   authPanel: {}
-  workspaceEntry: {}
-  sideNav: {}
 ---
 
 # Infinite Atelier design context
 
 ## Intent and scope
 
-The application is a creative workbench. The root route is a functional workspace entry, not a promotional landing page: recent canvases, continuation, and creation actions take priority over brand storytelling. Canvas and MONOFORM carry the expressive product identity, while the workspace shell stays quiet, compact, and explicit. Account/security controls remain familiar and are not redesigned by the workspace entry.
-
-The canonical shell is a responsive desktop side rail plus a compact mobile header/drawer. The side rail groups product routes under 工作区 and system routes under 系统; it owns the primary 新建画布 action and the account/status footer. Canvas detail routes remain full-screen and hide the global shell.
+The application is a creative workbench, not an authentication landing-page redesign. Canvas and MONOFORM carry the expressive product identity. Account/security controls remain familiar, compact and explicit. The current task verifies the existing Codex integration flow without changing the canvas, marketing shell or design direction.
 
 Supported UI locales are `zh-CN` and `en-US`; locale is not evidence of a geographic market. The default Chinese copy and English equivalents must describe the same operation and recovery path.
 
@@ -39,18 +35,15 @@ Supported UI locales are `zh-CN` and `en-US`; locale is not evidence of a geogra
 
 This file records existing values; it does not generate or replace the runtime theme.
 
-| Role                                         | Canonical source                                                                                   | Adapter/consumer                                                       |
-| -------------------------------------------- | -------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| Primary/elevated light and dark colors       | `web/src/lib/app-theme.ts`, `neutral`                                                              | `getAntThemeConfig` → `AppProviders` → Ant Design components           |
-| CSS surfaces, text, border, focus and radius | `web/src/styles/globals.css`                                                                       | CSS custom properties/Tailwind utilities                               |
-| Workspace shell and responsive navigation    | `web/src/components/layout/app-side-nav.tsx`, `app-top-nav.tsx`, `web/src/layouts/user-layout.tsx` | `UserLayout` + Tailwind utilities                                      |
-| Workspace entry layout and project cards     | `web/src/components/home/workspace-entry.tsx`                                                      | `/` route and existing `CanvasProject` store                           |
-| New-canvas overlay                           | `web/src/components/home/new-canvas-dialog.tsx`                                                    | Ant Design `Modal` through `AppProviders`                              |
-| Control typography/radius                    | Ant Design theme through `AppProviders`                                                            | Button, Input and Drawer; do not override with a feature-specific font |
-| Panel/code spacing                           | `codex-login-panel.tsx` existing `p-4`, `p-3`, `space-y-4`                                         | One shared Codex login panel in both settings entry points             |
-| Auth helper/description text                 | `--muted-foreground` in `globals.css`                                                              | `text-muted-foreground`; contrast must be verified in both themes      |
-| Technical verification code                  | `font-mono` utility                                                                                | Read-only selectable Input                                             |
-| Language and component locale                | `web/src/i18n`, `AppProviders`                                                                     | React i18next + matching Ant Design locale                             |
+| Role | Canonical source | Adapter/consumer |
+| --- | --- | --- |
+| Primary/elevated light and dark colors | `web/src/lib/app-theme.ts`, `neutral` | `getAntThemeConfig` → `AppProviders` → Ant Design components |
+| CSS surfaces, text, border, focus and radius | `web/src/styles/globals.css` | CSS custom properties/Tailwind utilities |
+| Control typography/radius | Ant Design theme through `AppProviders` | Button, Input and Drawer; do not override with a feature-specific font |
+| Panel/code spacing | `codex-login-panel.tsx` existing `p-4`, `p-3`, `space-y-4` | One shared Codex login panel in both settings entry points |
+| Auth helper/description text | `--muted-foreground` in `globals.css` | `text-muted-foreground`; contrast must be verified in both themes |
+| Technical verification code | `font-mono` utility | Read-only selectable Input |
+| Language and component locale | `web/src/i18n`, `AppProviders` | React i18next + matching Ant Design locale |
 
 Do not hand-copy theme values into unrelated components. The frontmatter colors mirror `app-theme.ts`, and radius mirrors the CSS variable; component-specific Ant Design geometry remains library-owned.
 

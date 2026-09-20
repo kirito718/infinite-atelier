@@ -13,6 +13,7 @@ import { CodexAppServerClient } from "./app-server-client.mjs";
 import { createBridgeServer } from "./server.mjs";
 
 const SECRET = "test-bridge-secret";
+const DEVICE_LOGIN = { type: "chatgptDeviceCode", loginId: "login-1", verificationUrl: "https://auth.openai.com/codex/device", userCode: "ABCD-1234" };
 const PNG_BYTES = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 test("Codex client initializes once and sends documented image turn inputs", { timeout: 500 }, async () => {
@@ -28,7 +29,7 @@ test("Codex client initializes once and sends documented image turn inputs", { t
     });
 
     assert.deepEqual(account, { account: null, requiresOpenaiAuth: true });
-    assert.deepEqual(login, { authUrl: "https://chatgpt.com/auth/test" });
+    assert.deepEqual(login, DEVICE_LOGIN);
     assert.deepEqual(generated.files[0].bytes, PNG_BYTES);
     assert.equal(generated.files[0].mimeType, "image/png");
 
@@ -48,9 +49,7 @@ test("Codex client initializes once and sends documented image turn inputs", { t
     });
     assert.deepEqual(process.messages[1], { method: "initialized", params: {} });
     assert.deepEqual(requests[2].params, {
-        type: "chatgpt",
-        useHostedLoginSuccessPage: true,
-        appBrand: "codex",
+        type: "chatgptDeviceCode",
     });
     assert.equal(requests[3].params.sandbox, "workspace-write");
     assert.deepEqual(requests[4].params.input, [
@@ -61,12 +60,45 @@ test("Codex client initializes once and sends documented image turn inputs", { t
     await client.close();
 });
 
+test("Codex client reads image output included in the completed turn payload", async () => {
+    const process = createFakeAppServerProcess({ emitImageItemNotification: false, includeImageItemInTurn: true });
+    const client = new CodexAppServerClient({ spawnProcess: () => process });
+
+    const generated = await client.generateImage({ prompt: "Use the completed turn image", references: [], workDir: "/tmp/task" });
+
+    assert.deepEqual(generated.files[0].bytes, PNG_BYTES);
+    assert.equal(generated.files[0].mimeType, "image/png");
+    await client.close();
+});
+
+test("Codex client decodes a raw base64 image result without a saved path", async () => {
+    const process = createFakeAppServerProcess({
+        emitImageItemNotification: false,
+        includeImageItemInTurn: true,
+        imageItem: {
+            type: "imageGeneration",
+            id: "image-raw-base64",
+            status: "completed",
+            revisedPrompt: null,
+            result: PNG_BYTES.toString("base64"),
+            failure: null,
+        },
+    });
+    const client = new CodexAppServerClient({ spawnProcess: () => process });
+
+    const generated = await client.generateImage({ prompt: "Decode the raw image", references: [], workDir: "/tmp/task" });
+
+    assert.deepEqual(generated.files[0].bytes, PNG_BYTES);
+    assert.equal(generated.files[0].mimeType, "image/png");
+    await client.close();
+});
+
 test("Codex client tracks ChatGPT OAuth completion notifications", async () => {
     const process = createFakeAppServerProcess();
     const client = new CodexAppServerClient({ spawnProcess: () => process });
 
     await client.login();
-    assert.equal(client.accountStatus, "disconnected");
+    assert.equal(client.accountStatus, "connecting");
 
     process.stdout.write(
         `${JSON.stringify({
@@ -83,8 +115,8 @@ test("Codex client tracks ChatGPT OAuth completion notifications", async () => {
             params: { loginId: "login-1", success: false, error: "cancelled", onboardingEntrypoint: null },
         })}\n`,
     );
-    await waitUntil(() => client.accountStatus === "disconnected");
-    assert.equal(client.accountStatus, "disconnected");
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(client.accountStatus, "connected", "stale completion must not replace a completed attempt");
     await client.close();
 });
 
@@ -613,7 +645,7 @@ test("starts ChatGPT login and logs out through Codex", async () => {
     const codex = {
         status: "disconnected",
         async login() {
-            return { authUrl: "https://chatgpt.com/auth/test" };
+            return DEVICE_LOGIN;
         },
         async logout() {},
     };
@@ -621,7 +653,7 @@ test("starts ChatGPT login and logs out through Codex", async () => {
     await withServer(codex, async ({ request }) => {
         const login = await request("/v1/login", { method: "POST", body: "{}" });
         assert.equal(login.status, 200);
-        assert.deepEqual(await login.json(), { authUrl: "https://chatgpt.com/auth/test" });
+        assert.deepEqual(await login.json(), DEVICE_LOGIN);
 
         const logout = await request("/v1/logout", { method: "POST", body: "{}" });
         assert.equal(logout.status, 204);
@@ -675,7 +707,7 @@ async function waitForTerminalTask(request, taskId) {
     assert.fail(`Task ${taskId} did not reach a terminal state`);
 }
 
-function createFakeAppServerProcess({ completeTurn = true, imageItem } = {}) {
+function createFakeAppServerProcess({ completeTurn = true, imageItem, emitImageItemNotification = true, includeImageItemInTurn = false } = {}) {
     const child = new EventEmitter();
     child.stdin = new PassThrough();
     child.stdout = new PassThrough();
@@ -705,9 +737,7 @@ function createFakeAppServerProcess({ completeTurn = true, imageItem } = {}) {
                 respond({
                     id: message.id,
                     result: {
-                        type: "chatgpt",
-                        loginId: "login-1",
-                        authUrl: "https://chatgpt.com/auth/test",
+                        ...DEVICE_LOGIN,
                     },
                 });
             } else if (message.method === "account/logout") {
@@ -722,31 +752,30 @@ function createFakeAppServerProcess({ completeTurn = true, imageItem } = {}) {
                     });
                     continue;
                 }
+                const generatedImage = imageItem ?? {
+                    type: "imageGeneration",
+                    id: "image-1",
+                    status: "completed",
+                    revisedPrompt: null,
+                    result: `data:image/png;base64,${PNG_BYTES.toString("base64")}`,
+                    failure: null,
+                };
                 const messages = [
                     {
                         id: message.id,
                         result: { turn: { id: "turn-1", status: "inProgress", items: [], error: null } },
                     },
-                    {
-                        method: "item/completed",
-                        params: {
-                            threadId: "thread-1",
-                            turnId: "turn-1",
-                            item: imageItem ?? {
-                                type: "imageGeneration",
-                                id: "image-1",
-                                status: "completed",
-                                revisedPrompt: null,
-                                result: `data:image/png;base64,${PNG_BYTES.toString("base64")}`,
-                                failure: null,
-                            },
-                        },
-                    },
+                    ...(emitImageItemNotification
+                        ? [{
+                              method: "item/completed",
+                              params: { threadId: "thread-1", turnId: "turn-1", item: generatedImage },
+                          }]
+                        : []),
                     {
                         method: "turn/completed",
                         params: {
                             threadId: "thread-1",
-                            turn: { id: "turn-1", status: "completed", items: [], error: null },
+                            turn: { id: "turn-1", status: "completed", items: includeImageItemInTurn ? [generatedImage] : [], error: null },
                         },
                     },
                 ];

@@ -1,3 +1,4 @@
+import { isLoginId, publicDeviceLogin } from "./device-login.mjs";
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
@@ -76,11 +77,16 @@ async function routeRequest({ request, response, codex, tasks, cleanupMs, tempRo
     }
 
     if (method === "POST" && pathname === "/v1/login") {
-        const result = await codex.login();
-        if (typeof result?.authUrl !== "string" || result.authUrl.length === 0) {
-            throw new Error("Codex login did not return an auth URL");
-        }
-        sendJson(response, 200, { authUrl: result.authUrl });
+        const result = publicDeviceLogin(await codex.login());
+        sendJson(response, 200, result);
+        return;
+    }
+
+    if (method === "POST" && pathname === "/v1/login/cancel") {
+        const body = await readJsonBody(request);
+        if (!isLoginId(body?.loginId)) throw new HttpError(400, "A valid loginId is required");
+        await codex.cancelLogin(body.loginId);
+        response.writeHead(204).end();
         return;
     }
 

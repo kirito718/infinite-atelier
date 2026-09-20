@@ -51,19 +51,19 @@ test("same-origin Codex API still accepts the mounted request path after middlew
     });
 });
 
-test("same-origin Codex API starts OAuth and logs out without returning credentials", async () => {
+test("same-origin Codex API starts device-code login and logs out without returning credentials", async () => {
     await withApi(
         {
             status: "disconnected",
             async login() {
-                return { authUrl: "https://chatgpt.com/auth/test" };
+                return { type: "chatgptDeviceCode", loginId: "login-1", verificationUrl: "https://auth.openai.com/codex/device", userCode: "ABCD-1234" };
             },
             async logout() {},
         },
         async ({ request }) => {
             const login = await request("/api/codex-subscription/v1/login", { method: "POST", body: "{}" });
             assert.equal(login.status, 200);
-            assert.deepEqual(await login.json(), { authUrl: "https://chatgpt.com/auth/test" });
+            assert.deepEqual(await login.json(), { type: "chatgptDeviceCode", loginId: "login-1", verificationUrl: "https://auth.openai.com/codex/device", userCode: "ABCD-1234" });
 
             const logout = await request("/api/codex-subscription/v1/logout", { method: "POST", body: "{}" });
             assert.equal(logout.status, 204);

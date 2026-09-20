@@ -84,6 +84,9 @@ export function verifyContainerEnvironment(actual, expected) {
         "Unexpected effective Atelier environment",
     );
 }
+export function verifyNativeTls(evidence) {
+    check(Number.isInteger(evidence?.caCertificates) && evidence.caCertificates > 0, "Native Codex HTTPS requires a readable system CA bundle in the runtime image");
+}
 export function verifyResource(item, kind, project) {
     const labels = kind === "container" ? item.Config?.Labels : item.Labels;
     check(labels?.[LABEL + "project"] === project, "Refusing resource without exact project ownership");
@@ -526,9 +529,13 @@ async function main(options) {
         const entries = await execNode(
             WEB +
                 `fs.writeFileSync(path.join(web, 'dist', p.path.slice(1)), p.nonce, { flag: 'wx', mode: 0o600 });
-console.log(JSON.stringify({ node: process.version, main: hash(fs.readFileSync(path.join(web, 'dist/index.html'))), monoform: hash(fs.readFileSync(path.join(web, 'dist/monoform/index.html'))) }));`,
+const caPath = '/etc/ssl/certs/ca-certificates.crt';
+const caCertificates = fs.existsSync(caPath) ? (fs.readFileSync(caPath, 'utf8').match(/-----BEGIN CERTIFICATE-----/g) || []).length : 0;
+console.log(JSON.stringify({ node: process.version, caCertificates, main: hash(fs.readFileSync(path.join(web, 'dist/index.html'))), monoform: hash(fs.readFileSync(path.join(web, 'dist/monoform/index.html'))) }));`,
             probe,
         );
+        verifyNativeTls(entries);
+        report.nativeTls = { caCertificates: entries.caCertificates };
         const ready = AbortSignal.any([controller.signal, AbortSignal.timeout(60000)]);
         while (true) {
             let response;

@@ -1,10 +1,10 @@
 import { Button, Drawer, Input, Segmented, Select, Space } from "antd";
-import { ExternalLink, ListPlus, LogIn, LogOut, Trash2 } from "lucide-react";
+import { ListPlus, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { CODEX_SUBSCRIPTION_CHANNEL_ID, defaultBaseUrlForApiFormat, guessCapability, normalizeChannelModels, type ApiCallFormat, type ChannelModel, type ModelCapability, type ModelChannel } from "@/stores/use-config-store";
-import { beginCodexLogin, getCodexStatus, logoutCodex, type CodexStatus } from "@/services/codex-image";
+import { CodexLoginPanel } from "./codex-login-panel";
 import { ModelScriptEditor } from "./model-script-editor";
 import { ModelSelectModal } from "./model-select-modal";
 
@@ -15,7 +15,6 @@ export function ChannelEditorDrawer({ open, channel, onSave, onClose }: { open: 
     const [draft, setDraft] = useState<ModelChannel | null>(channel);
     const [selectOpen, setSelectOpen] = useState(false);
     const [scriptTarget, setScriptTarget] = useState<ScriptTarget | null>(null);
-    const [codexStatus, setCodexStatus] = useState<CodexStatus>("unavailable");
     const apiFormatOptions: Array<{ label: string; value: ApiCallFormat }> = [
         { label: "OpenAI", value: "openai" },
         { label: "Gemini", value: "gemini" },
@@ -25,21 +24,6 @@ export function ChannelEditorDrawer({ open, channel, onSave, onClose }: { open: 
     useEffect(() => {
         if (open && channel) setDraft(channel);
     }, [open, channel]);
-
-    useEffect(() => {
-        if (!open || channel?.id !== CODEX_SUBSCRIPTION_CHANNEL_ID) return;
-        let active = true;
-        const refresh = () =>
-            void getCodexStatus()
-                .then((status) => active && setCodexStatus(status))
-                .catch(() => active && setCodexStatus("unavailable"));
-        refresh();
-        const timer = window.setInterval(refresh, 1500);
-        return () => {
-            active = false;
-            window.clearInterval(timer);
-        };
-    }, [open, channel?.id]);
 
     if (!draft) return null;
 
@@ -65,28 +49,6 @@ export function ChannelEditorDrawer({ open, channel, onSave, onClose }: { open: 
         onClose();
     };
 
-    const connectCodex = async () => {
-        const loginWindow = window.open("about:blank", "_blank");
-        setCodexStatus("connecting");
-        try {
-            const { authUrl } = await beginCodexLogin();
-            if (loginWindow && !loginWindow.closed) loginWindow.location.replace(authUrl);
-            else window.open(authUrl, "_blank", "noopener,noreferrer");
-            setCodexStatus("connecting");
-        } catch {
-            loginWindow?.close();
-            setCodexStatus("unavailable");
-        }
-    };
-
-    const disconnectCodex = async () => {
-        try {
-            await logoutCodex();
-        } finally {
-            setCodexStatus("disconnected");
-        }
-    };
-
     const isCodexSubscription = draft.id === CODEX_SUBSCRIPTION_CHANNEL_ID;
 
     return (
@@ -107,28 +69,7 @@ export function ChannelEditorDrawer({ open, channel, onSave, onClose }: { open: 
                 </Space>
             }
         >
-            {isCodexSubscription ? (
-                <div className="space-y-4 rounded-lg border border-stone-200 p-4 dark:border-stone-800">
-                    <div>
-                        <div className="text-base font-semibold">{t("config.codex.title")}</div>
-                        <div className="mt-1 text-sm text-stone-500">{t("config.codex.description")}</div>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-3">
-                        <span className="rounded-full border border-stone-200 px-3 py-1 text-sm dark:border-stone-700">{t(`config.codex.status.${codexStatus}`)}</span>
-                        {codexStatus === "connected" ? (
-                            <Button icon={<LogOut className="size-4" />} onClick={() => void disconnectCodex()}>
-                                {t("config.codex.disconnect")}
-                            </Button>
-                        ) : (
-                            <Button type="primary" icon={<LogIn className="size-4" />} loading={codexStatus === "connecting"} onClick={() => void connectCodex()}>
-                                {t("config.codex.connect")}
-                            </Button>
-                        )}
-                        {codexStatus === "connecting" ? <ExternalLink className="size-4 text-stone-400" aria-label={t("config.codex.waiting") as string} /> : null}
-                    </div>
-                    <div className="text-xs text-stone-500">{t("config.codex.imageOnly")}</div>
-                </div>
-            ) : null}
+            {open && isCodexSubscription && channel?.id === CODEX_SUBSCRIPTION_CHANNEL_ID ? <CodexLoginPanel /> : null}
             {isCodexSubscription ? null : (
                 <>
                     <div className="grid gap-4 md:grid-cols-2">
