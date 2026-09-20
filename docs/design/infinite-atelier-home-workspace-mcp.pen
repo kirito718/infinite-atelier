@@ -1,0 +1,1981 @@
+{
+  "version": "2.18",
+  "children": [
+    {
+      "type": "frame",
+      "id": "nBdu7",
+      "x": 80,
+      "y": 80,
+      "name": "01 / Workspace entry",
+      "clip": true,
+      "width": 1440,
+      "height": 1024,
+      "fill": "$bg",
+      "children": [
+        {
+          "type": "frame",
+          "id": "HkI4x",
+          "name": "Sidebar",
+          "width": 236,
+          "height": "fill_container",
+          "fill": "$surface",
+          "stroke": "$line",
+          "strokeWidth": {
+            "right": 1
+          },
+          "layout": "vertical",
+          "gap": 18,
+          "padding": [
+            24,
+            20
+          ],
+          "children": [
+            {
+              "type": "frame",
+              "id": "r6cUMJ",
+              "name": "Brand row",
+              "width": "fill_container",
+              "height": 34,
+              "gap": 10,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "rectangle",
+                  "cornerRadius": 7,
+                  "id": "jJYqH",
+                  "name": "Brand mark",
+                  "fill": "$accent",
+                  "width": 22,
+                  "height": 22
+                },
+                {
+                  "type": "text",
+                  "id": "pXQXS",
+                  "name": "Brand name",
+                  "fill": "$ink",
+                  "content": "Infinite Atelier",
+                  "fontFamily": "$font-body",
+                  "fontSize": 15,
+                  "fontWeight": "700"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "IXPgS",
+              "name": "Create canvas button",
+              "width": "fill_container",
+              "height": 42,
+              "fill": "$accent",
+              "cornerRadius": 10,
+              "gap": 8,
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "m2xyg",
+                  "name": "Create canvas icon",
+                  "width": 16,
+                  "height": 16,
+                  "icon": "plus",
+                  "library": "lucide",
+                  "fill": "#FFFFFF"
+                },
+                {
+                  "type": "text",
+                  "id": "iGGsB",
+                  "name": "Create canvas label",
+                  "fill": "#FFFFFF",
+                  "content": "新建画布",
+                  "fontFamily": "$font-body",
+                  "fontSize": 14,
+                  "fontWeight": "700"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "kd0o2",
+              "name": "Workspace navigation group",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 6,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "wUuhF",
+                  "name": "Workspace navigation label",
+                  "fill": "$muted",
+                  "content": "WORKSPACE",
+                  "fontFamily": "$font-body",
+                  "fontSize": 10,
+                  "fontWeight": "700",
+                  "letterSpacing": 1.4
+                },
+                {
+                  "type": "frame",
+                  "id": "Jr5Bt",
+                  "name": "Canvas navigation item",
+                  "width": "fill_container",
+                  "height": 36,
+                  "fill": "$accent-soft",
+                  "cornerRadius": 8,
+                  "gap": 10,
+                  "padding": [
+                    0,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "aF8Gr",
+                      "name": "Canvas navigation icon",
+                      "width": 16,
+                      "height": 16,
+                      "icon": "layers-2",
+                      "library": "lucide",
+                      "fill": "$accent"
+                    },
+                    {
+                      "type": "text",
+                      "id": "DsJ2W",
+                      "name": "Canvas navigation text",
+                      "fill": "$ink",
+                      "content": "Canvas",
+                      "fontFamily": "$font-body",
+                      "fontSize": 13,
+                      "fontWeight": "700"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "d8EYs5",
+                  "name": "Director navigation item",
+                  "width": "fill_container",
+                  "height": 36,
+                  "fill": "#00000000",
+                  "cornerRadius": 8,
+                  "gap": 10,
+                  "padding": [
+                    0,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "Mh64z",
+                      "name": "Director navigation icon",
+                      "width": 16,
+                      "height": 16,
+                      "icon": "clapperboard",
+                      "library": "lucide",
+                      "fill": "$muted"
+                    },
+                    {
+                      "type": "text",
+                      "id": "J14VaD",
+                      "name": "Director navigation text",
+                      "fill": "$muted",
+                      "content": "Director",
+                      "fontFamily": "$font-body",
+                      "fontSize": 13,
+                      "fontWeight": "500"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "XQDZU",
+                  "name": "Assets navigation item",
+                  "width": "fill_container",
+                  "height": 36,
+                  "fill": "#00000000",
+                  "cornerRadius": 8,
+                  "gap": 10,
+                  "padding": [
+                    0,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "D3o74",
+                      "name": "Assets navigation icon",
+                      "width": 16,
+                      "height": 16,
+                      "icon": "images",
+                      "library": "lucide",
+                      "fill": "$muted"
+                    },
+                    {
+                      "type": "text",
+                      "id": "s51Zwp",
+                      "name": "Assets navigation text",
+                      "fill": "$muted",
+                      "content": "Assets",
+                      "fontFamily": "$font-body",
+                      "fontSize": 13,
+                      "fontWeight": "500"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "d0sHQ1",
+              "name": "System navigation group",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 6,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "dzzap",
+                  "name": "System navigation label",
+                  "fill": "$muted",
+                  "content": "SYSTEM",
+                  "fontFamily": "$font-body",
+                  "fontSize": 10,
+                  "fontWeight": "700",
+                  "letterSpacing": 1.4
+                },
+                {
+                  "type": "frame",
+                  "id": "K554W",
+                  "name": "Config navigation item",
+                  "width": "fill_container",
+                  "height": 36,
+                  "cornerRadius": 8,
+                  "gap": 10,
+                  "padding": [
+                    0,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "J8AmG",
+                      "name": "Config navigation icon",
+                      "width": 16,
+                      "height": 16,
+                      "icon": "settings-2",
+                      "library": "lucide",
+                      "fill": "$muted"
+                    },
+                    {
+                      "type": "text",
+                      "id": "MtODG",
+                      "name": "Config navigation text",
+                      "fill": "$muted",
+                      "content": "Config",
+                      "fontFamily": "$font-body",
+                      "fontSize": 13,
+                      "fontWeight": "500"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "g8ZnL",
+              "name": "Sidebar spacer",
+              "width": "fill_container",
+              "height": "fill_container"
+            },
+            {
+              "type": "frame",
+              "id": "xCZCk",
+              "name": "Account row",
+              "width": "fill_container",
+              "height": 44,
+              "gap": 10,
+              "padding": [
+                0,
+                4
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "ellipse",
+                  "id": "iYSsw",
+                  "name": "Account avatar",
+                  "fill": "$gold",
+                  "width": 28,
+                  "height": 28
+                },
+                {
+                  "type": "frame",
+                  "id": "TdOh6",
+                  "name": "Account text",
+                  "layout": "vertical",
+                  "gap": 2,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "UdTVm",
+                      "name": "Account name",
+                      "fill": "$ink",
+                      "content": "Creative workspace",
+                      "fontFamily": "$font-body",
+                      "fontSize": 12,
+                      "fontWeight": "700"
+                    },
+                    {
+                      "type": "text",
+                      "id": "Wr3YG",
+                      "name": "Account status",
+                      "fill": "$muted",
+                      "content": "Local-first",
+                      "fontFamily": "$font-body",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "Q3vDd",
+          "name": "Main workspace",
+          "width": "fill_container",
+          "height": "fill_container",
+          "fill": "$bg",
+          "layout": "vertical",
+          "padding": [
+            0,
+            32
+          ],
+          "children": [
+            {
+              "type": "frame",
+              "id": "p1P2nI",
+              "name": "Workspace header",
+              "width": "fill_container",
+              "height": 84,
+              "justifyContent": "space_between",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "SV8wq",
+                  "name": "Header title group",
+                  "layout": "vertical",
+                  "gap": 5,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "OZO6r",
+                      "name": "Header eyebrow",
+                      "fill": "$accent",
+                      "content": "CANVAS LIBRARY / WORKSPACE",
+                      "fontFamily": "$font-body",
+                      "fontSize": 10,
+                      "fontWeight": "700",
+                      "letterSpacing": 1.3
+                    },
+                    {
+                      "type": "text",
+                      "id": "v09Zig",
+                      "name": "Header title",
+                      "fill": "$ink",
+                      "content": "继续创作",
+                      "fontFamily": "$font-body",
+                      "fontSize": 28,
+                      "fontWeight": "700"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "b3J4L",
+                  "name": "Header actions",
+                  "gap": 10,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "dQOcE",
+                      "name": "Search field",
+                      "width": 210,
+                      "height": 36,
+                      "fill": "$panel",
+                      "cornerRadius": 9,
+                      "stroke": "$line",
+                      "strokeWidth": 1,
+                      "gap": 8,
+                      "padding": [
+                        0,
+                        12
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "K265i",
+                          "name": "Search icon",
+                          "width": 15,
+                          "height": 15,
+                          "icon": "search",
+                          "library": "lucide",
+                          "fill": "$muted"
+                        },
+                        {
+                          "type": "text",
+                          "id": "FGoTR",
+                          "name": "Search placeholder",
+                          "fill": "$muted",
+                          "content": "搜索画布",
+                          "fontFamily": "$font-body",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "Z4oXH",
+                      "name": "Import project button",
+                      "width": 90,
+                      "height": 36,
+                      "fill": "$panel",
+                      "cornerRadius": 9,
+                      "stroke": "$line",
+                      "strokeWidth": 1,
+                      "gap": 7,
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "hwJNy",
+                          "name": "Import icon",
+                          "width": 15,
+                          "height": 15,
+                          "icon": "upload",
+                          "library": "lucide",
+                          "fill": "$ink"
+                        },
+                        {
+                          "type": "text",
+                          "id": "PchqK",
+                          "name": "Import label",
+                          "fill": "$ink",
+                          "content": "导入",
+                          "fontFamily": "$font-body",
+                          "fontSize": 12,
+                          "fontWeight": "600"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "uZQwd",
+              "name": "Workspace content",
+              "width": "fill_container",
+              "height": "fill_container",
+              "layout": "vertical",
+              "gap": 24,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "H6O3aw",
+                  "name": "Continue section",
+                  "width": "fill_container",
+                  "height": 285,
+                  "gap": 18,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "FgF2R",
+                      "name": "Featured project",
+                      "width": 714,
+                      "height": "fill_container",
+                      "fill": "$dark",
+                      "cornerRadius": 18,
+                      "layout": "vertical",
+                      "gap": 16,
+                      "padding": 22,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "pmOLd",
+                          "name": "Featured header",
+                          "width": "fill_container",
+                          "height": 20,
+                          "justifyContent": "space_between",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "EhmOo",
+                              "name": "Featured eyebrow",
+                              "fill": "#BBAFA4",
+                              "content": "LAST OPENED / 12 MIN AGO",
+                              "fontFamily": "$font-body",
+                              "fontSize": 10,
+                              "fontWeight": "700",
+                              "letterSpacing": 1.1
+                            },
+                            {
+                              "type": "icon",
+                              "id": "D07nl",
+                              "name": "Featured menu",
+                              "width": 18,
+                              "height": 18,
+                              "icon": "ellipsis",
+                              "library": "lucide",
+                              "fill": "#BBAFA4"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "text",
+                          "id": "t3YMWO",
+                          "name": "Featured title",
+                          "fill": "#FFFDF8",
+                          "content": "品牌视觉探索 · Q4",
+                          "fontFamily": "$font-body",
+                          "fontSize": 24,
+                          "fontWeight": "700"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "Oxv2N",
+                          "name": "Featured preview",
+                          "clip": true,
+                          "width": "fill_container",
+                          "height": 110,
+                          "fill": "$dark-panel",
+                          "cornerRadius": 12,
+                          "layout": "none",
+                          "children": [
+                            {
+                              "type": "rectangle",
+                              "cornerRadius": 7,
+                              "id": "E2zYkd",
+                              "x": 26,
+                              "y": 22,
+                              "name": "Preview plane one",
+                              "fill": "#41352E",
+                              "width": 174,
+                              "height": 60
+                            },
+                            {
+                              "type": "rectangle",
+                              "cornerRadius": 7,
+                              "id": "eolDJ",
+                              "x": 222,
+                              "y": 12,
+                              "name": "Preview plane two",
+                              "fill": "#E5543F",
+                              "width": 210,
+                              "height": 78
+                            },
+                            {
+                              "type": "rectangle",
+                              "cornerRadius": 7,
+                              "id": "t2cCG",
+                              "x": 454,
+                              "y": 30,
+                              "name": "Preview plane three",
+                              "fill": "#D8B56D",
+                              "width": 156,
+                              "height": 52
+                            },
+                            {
+                              "type": "ellipse",
+                              "id": "V8YPE7",
+                              "x": 112,
+                              "y": 10,
+                              "name": "Preview orbit",
+                              "width": 260,
+                              "height": 90,
+                              "stroke": "#FFFFFF66",
+                              "strokeWidth": 1
+                            },
+                            {
+                              "type": "icon",
+                              "id": "gi6Am",
+                              "x": 574,
+                              "y": 42,
+                              "name": "Preview sparkle",
+                              "width": 24,
+                              "height": 24,
+                              "icon": "sparkles",
+                              "library": "lucide",
+                              "fill": "#FFFDF8"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "hzu3d",
+                          "name": "Featured footer",
+                          "width": "fill_container",
+                          "height": 24,
+                          "justifyContent": "space_between",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "kOJde",
+                              "name": "Featured metadata",
+                              "fill": "#BBAFA4",
+                              "content": "18 nodes  ·  6 connections  ·  4 assets",
+                              "fontFamily": "$font-body",
+                              "fontSize": 11,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "frame",
+                              "id": "P4pnz",
+                              "name": "Open featured button",
+                              "gap": 6,
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "eA1AJ",
+                                  "name": "Open featured label",
+                                  "fill": "#FFFDF8",
+                                  "content": "打开项目",
+                                  "fontFamily": "$font-body",
+                                  "fontSize": 12,
+                                  "fontWeight": "700"
+                                },
+                                {
+                                  "type": "icon",
+                                  "id": "IVnZY",
+                                  "name": "Open featured icon",
+                                  "width": 15,
+                                  "height": 15,
+                                  "icon": "arrow-up-right",
+                                  "library": "lucide",
+                                  "fill": "$accent"
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "NnivM",
+                      "name": "Quick start panel",
+                      "width": "fill_container",
+                      "height": "fill_container",
+                      "fill": "$panel",
+                      "cornerRadius": 18,
+                      "stroke": "$line",
+                      "strokeWidth": 1,
+                      "layout": "vertical",
+                      "gap": 12,
+                      "padding": 20,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "WGpfI",
+                          "name": "Quick start header",
+                          "width": "fill_container",
+                          "height": 24,
+                          "justifyContent": "space_between",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "weH2t",
+                              "name": "Quick start title",
+                              "fill": "$ink",
+                              "content": "快速开始",
+                              "fontFamily": "$font-body",
+                              "fontSize": 16,
+                              "fontWeight": "700"
+                            },
+                            {
+                              "type": "text",
+                              "id": "Nn2qC",
+                              "name": "Quick start hint",
+                              "fill": "$muted",
+                              "content": "3 个入口",
+                              "fontFamily": "$font-body",
+                              "fontSize": 11,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "yPvKL",
+                          "name": "空白画布 quick action",
+                          "width": "fill_container",
+                          "height": 44,
+                          "fill": "$bg",
+                          "cornerRadius": 10,
+                          "gap": 11,
+                          "padding": [
+                            0,
+                            10
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "whOfG",
+                              "name": "空白画布 icon wrap",
+                              "width": 28,
+                              "height": 28,
+                              "fill": "$accent-soft",
+                              "cornerRadius": 8,
+                              "justifyContent": "center",
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "icon",
+                                  "id": "lNTd9",
+                                  "name": "空白画布 icon",
+                                  "width": 15,
+                                  "height": 15,
+                                  "icon": "file-plus",
+                                  "library": "lucide",
+                                  "fill": "$accent"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "SP5lY",
+                              "name": "空白画布 copy",
+                              "layout": "vertical",
+                              "gap": 2,
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "wyEDx",
+                                  "name": "空白画布 title",
+                                  "fill": "$ink",
+                                  "content": "空白画布",
+                                  "fontFamily": "$font-body",
+                                  "fontSize": 12,
+                                  "fontWeight": "700"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "G4eQQx",
+                                  "name": "空白画布 description",
+                                  "fill": "$muted",
+                                  "content": "从零开始",
+                                  "fontFamily": "$font-body",
+                                  "fontSize": 10,
+                                  "fontWeight": "normal"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "icon",
+                              "id": "AXLIN",
+                              "name": "空白画布 chevron",
+                              "width": 14,
+                              "height": 14,
+                              "icon": "chevron-right",
+                              "library": "lucide",
+                              "fill": "$muted"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "MnV6J",
+                          "name": "导入参考 quick action",
+                          "width": "fill_container",
+                          "height": 44,
+                          "fill": "$bg",
+                          "cornerRadius": 10,
+                          "gap": 11,
+                          "padding": [
+                            0,
+                            10
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "z6MI4n",
+                              "name": "导入参考 icon wrap",
+                              "width": 28,
+                              "height": 28,
+                              "fill": "$accent-soft",
+                              "cornerRadius": 8,
+                              "justifyContent": "center",
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "icon",
+                                  "id": "WAVc6",
+                                  "name": "导入参考 icon",
+                                  "width": 15,
+                                  "height": 15,
+                                  "icon": "folder-open",
+                                  "library": "lucide",
+                                  "fill": "$accent"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "H1IgB",
+                              "name": "导入参考 copy",
+                              "layout": "vertical",
+                              "gap": 2,
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "IcqOY",
+                                  "name": "导入参考 title",
+                                  "fill": "$ink",
+                                  "content": "导入参考",
+                                  "fontFamily": "$font-body",
+                                  "fontSize": 12,
+                                  "fontWeight": "700"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "VpjV9",
+                                  "name": "导入参考 description",
+                                  "fill": "$muted",
+                                  "content": "带入已有素材",
+                                  "fontFamily": "$font-body",
+                                  "fontSize": 10,
+                                  "fontWeight": "normal"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "icon",
+                              "id": "Zdouk",
+                              "name": "导入参考 chevron",
+                              "width": 14,
+                              "height": 14,
+                              "icon": "chevron-right",
+                              "library": "lucide",
+                              "fill": "$muted"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "E4ydcV",
+                          "name": "提示词起步 quick action",
+                          "width": "fill_container",
+                          "height": 44,
+                          "fill": "$bg",
+                          "cornerRadius": 10,
+                          "gap": 11,
+                          "padding": [
+                            0,
+                            10
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "N7AHno",
+                              "name": "提示词起步 icon wrap",
+                              "width": 28,
+                              "height": 28,
+                              "fill": "$accent-soft",
+                              "cornerRadius": 8,
+                              "justifyContent": "center",
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "icon",
+                                  "id": "hvRjY",
+                                  "name": "提示词起步 icon",
+                                  "width": 15,
+                                  "height": 15,
+                                  "icon": "wand-sparkles",
+                                  "library": "lucide",
+                                  "fill": "$accent"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "PZunS",
+                              "name": "提示词起步 copy",
+                              "layout": "vertical",
+                              "gap": 2,
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "djWX9",
+                                  "name": "提示词起步 title",
+                                  "fill": "$ink",
+                                  "content": "提示词起步",
+                                  "fontFamily": "$font-body",
+                                  "fontSize": 12,
+                                  "fontWeight": "700"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "cPTpk",
+                                  "name": "提示词起步 description",
+                                  "fill": "$muted",
+                                  "content": "从一句话开始",
+                                  "fontFamily": "$font-body",
+                                  "fontSize": 10,
+                                  "fontWeight": "normal"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "icon",
+                              "id": "GT6jY",
+                              "name": "提示词起步 chevron",
+                              "width": 14,
+                              "height": 14,
+                              "icon": "chevron-right",
+                              "library": "lucide",
+                              "fill": "$muted"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "gfX4W",
+                  "name": "Recent section",
+                  "width": "fill_container",
+                  "height": "fill_container",
+                  "layout": "vertical",
+                  "gap": 12,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "tLqcN",
+                      "name": "Recent header",
+                      "width": "fill_container",
+                      "height": 28,
+                      "justifyContent": "space_between",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "e6kUA9",
+                          "name": "Recent title group",
+                          "gap": 8,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon",
+                              "id": "IZsld",
+                              "name": "Recent clock",
+                              "width": 15,
+                              "height": 15,
+                              "icon": "clock-3",
+                              "library": "lucide",
+                              "fill": "$accent"
+                            },
+                            {
+                              "type": "text",
+                              "id": "PkVcF",
+                              "name": "Recent title",
+                              "fill": "$ink",
+                              "content": "最近画布",
+                              "fontFamily": "$font-body",
+                              "fontSize": 16,
+                              "fontWeight": "700"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "IXU5T",
+                          "name": "View all action",
+                          "gap": 5,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "HAtx9",
+                              "name": "View all label",
+                              "fill": "$muted",
+                              "content": "查看全部",
+                              "fontFamily": "$font-body",
+                              "fontSize": 12,
+                              "fontWeight": "600"
+                            },
+                            {
+                              "type": "icon",
+                              "id": "gpc7q",
+                              "name": "View all icon",
+                              "width": 14,
+                              "height": 14,
+                              "icon": "arrow-right",
+                              "library": "lucide",
+                              "fill": "$muted"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "xQTiv",
+                      "name": "Recent project grid",
+                      "width": "fill_container",
+                      "height": "fill_container",
+                      "gap": 14,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "cts2i",
+                          "name": "Project card 01",
+                          "width": 330,
+                          "height": "fill_container",
+                          "fill": "$panel",
+                          "cornerRadius": 16,
+                          "stroke": "$line",
+                          "strokeWidth": 1,
+                          "layout": "vertical",
+                          "gap": 12,
+                          "padding": 14,
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "wYVC4",
+                              "name": "Project thumbnail 01",
+                              "clip": true,
+                              "width": "fill_container",
+                              "height": 142,
+                              "fill": "#251A18",
+                              "cornerRadius": 11,
+                              "layout": "none",
+                              "children": [
+                                {
+                                  "type": "rectangle",
+                                  "cornerRadius": 6,
+                                  "id": "fo54w",
+                                  "x": 18,
+                                  "y": 22,
+                                  "name": "Thumbnail block A 01",
+                                  "fill": "$accent",
+                                  "width": 110,
+                                  "height": 80
+                                },
+                                {
+                                  "type": "rectangle",
+                                  "cornerRadius": 6,
+                                  "id": "P98H0S",
+                                  "x": 146,
+                                  "y": 46,
+                                  "name": "Thumbnail block B 01",
+                                  "fill": "#D8B56D",
+                                  "width": 140,
+                                  "height": 56
+                                },
+                                {
+                                  "type": "ellipse",
+                                  "id": "rDwBy",
+                                  "x": 58,
+                                  "y": 18,
+                                  "name": "Thumbnail orbit 01",
+                                  "width": 205,
+                                  "height": 100,
+                                  "stroke": "#FFFFFF55",
+                                  "strokeWidth": 1
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "eH2o4",
+                              "name": "Project meta 01",
+                              "width": "fill_container",
+                              "layout": "vertical",
+                              "gap": 6,
+                              "children": [
+                                {
+                                  "type": "frame",
+                                  "id": "AFEYU",
+                                  "name": "Project title row 01",
+                                  "width": "fill_container",
+                                  "height": 20,
+                                  "justifyContent": "space_between",
+                                  "alignItems": "center",
+                                  "children": [
+                                    {
+                                      "type": "text",
+                                      "id": "nUKbd",
+                                      "name": "Project title 01",
+                                      "fill": "$ink",
+                                      "content": "镜头板 · Neon Rain",
+                                      "fontFamily": "$font-body",
+                                      "fontSize": 14,
+                                      "fontWeight": "700"
+                                    },
+                                    {
+                                      "type": "icon",
+                                      "id": "AUYtf",
+                                      "name": "Project menu 01",
+                                      "width": 16,
+                                      "height": 16,
+                                      "icon": "ellipsis",
+                                      "library": "lucide",
+                                      "fill": "$muted"
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "dN0k8",
+                                  "name": "Project date 01",
+                                  "fill": "$muted",
+                                  "content": "06 / 18 / 2026  ·  12 nodes",
+                                  "fontFamily": "$font-body",
+                                  "fontSize": 11,
+                                  "fontWeight": "normal"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "HXhtO",
+                              "name": "Project footer 01",
+                              "width": "fill_container",
+                              "height": 18,
+                              "justifyContent": "space_between",
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "G0ytr",
+                                  "name": "Project status 01",
+                                  "fill": "$accent",
+                                  "content": "继续编辑",
+                                  "fontFamily": "$font-body",
+                                  "fontSize": 10,
+                                  "fontWeight": "700"
+                                },
+                                {
+                                  "type": "icon",
+                                  "id": "A7Y4Zl",
+                                  "name": "Project open icon 01",
+                                  "width": 14,
+                                  "height": 14,
+                                  "icon": "arrow-up-right",
+                                  "library": "lucide",
+                                  "fill": "$muted"
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "wPh9i",
+                          "name": "Project card 02",
+                          "width": 330,
+                          "height": "fill_container",
+                          "fill": "$panel",
+                          "cornerRadius": 16,
+                          "stroke": "$line",
+                          "strokeWidth": 1,
+                          "layout": "vertical",
+                          "gap": 12,
+                          "padding": 14,
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "RYKHV",
+                              "name": "Project thumbnail 02",
+                              "clip": true,
+                              "width": "fill_container",
+                              "height": 142,
+                              "fill": "#E8E0D4",
+                              "cornerRadius": 11,
+                              "layout": "none",
+                              "children": [
+                                {
+                                  "type": "rectangle",
+                                  "cornerRadius": 6,
+                                  "id": "stEOU",
+                                  "x": 18,
+                                  "y": 22,
+                                  "name": "Thumbnail block A 02",
+                                  "fill": "$gold",
+                                  "width": 110,
+                                  "height": 80
+                                },
+                                {
+                                  "type": "rectangle",
+                                  "cornerRadius": 6,
+                                  "id": "p73pa",
+                                  "x": 146,
+                                  "y": 46,
+                                  "name": "Thumbnail block B 02",
+                                  "fill": "#FFFFFF",
+                                  "width": 140,
+                                  "height": 56
+                                },
+                                {
+                                  "type": "ellipse",
+                                  "id": "l5uGYe",
+                                  "x": 58,
+                                  "y": 18,
+                                  "name": "Thumbnail orbit 02",
+                                  "width": 205,
+                                  "height": 100,
+                                  "stroke": "#1C191733",
+                                  "strokeWidth": 1
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "sY2fb",
+                              "name": "Project meta 02",
+                              "width": "fill_container",
+                              "layout": "vertical",
+                              "gap": 6,
+                              "children": [
+                                {
+                                  "type": "frame",
+                                  "id": "CVgVD",
+                                  "name": "Project title row 02",
+                                  "width": "fill_container",
+                                  "height": 20,
+                                  "justifyContent": "space_between",
+                                  "alignItems": "center",
+                                  "children": [
+                                    {
+                                      "type": "text",
+                                      "id": "Zljke",
+                                      "name": "Project title 02",
+                                      "fill": "$ink",
+                                      "content": "品牌资产整理",
+                                      "fontFamily": "$font-body",
+                                      "fontSize": 14,
+                                      "fontWeight": "700"
+                                    },
+                                    {
+                                      "type": "icon",
+                                      "id": "KES6c",
+                                      "name": "Project menu 02",
+                                      "width": 16,
+                                      "height": 16,
+                                      "icon": "ellipsis",
+                                      "library": "lucide",
+                                      "fill": "$muted"
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "JwjGf",
+                                  "name": "Project date 02",
+                                  "fill": "$muted",
+                                  "content": "06 / 17 / 2026  ·  34 nodes",
+                                  "fontFamily": "$font-body",
+                                  "fontSize": 11,
+                                  "fontWeight": "normal"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "rHFCJ",
+                              "name": "Project footer 02",
+                              "width": "fill_container",
+                              "height": 18,
+                              "justifyContent": "space_between",
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "IaS9H",
+                                  "name": "Project status 02",
+                                  "fill": "$muted",
+                                  "content": "已保存",
+                                  "fontFamily": "$font-body",
+                                  "fontSize": 10,
+                                  "fontWeight": "700"
+                                },
+                                {
+                                  "type": "icon",
+                                  "id": "wYFf6",
+                                  "name": "Project open icon 02",
+                                  "width": 14,
+                                  "height": 14,
+                                  "icon": "arrow-up-right",
+                                  "library": "lucide",
+                                  "fill": "$muted"
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "t7JEL1",
+                          "name": "Project card 03",
+                          "width": 330,
+                          "height": "fill_container",
+                          "fill": "$panel",
+                          "cornerRadius": 16,
+                          "stroke": "$line",
+                          "strokeWidth": 1,
+                          "layout": "vertical",
+                          "gap": 12,
+                          "padding": 14,
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "cgY5X",
+                              "name": "Project thumbnail 03",
+                              "clip": true,
+                              "width": "fill_container",
+                              "height": 142,
+                              "fill": "#E7E9E4",
+                              "cornerRadius": 11,
+                              "layout": "none",
+                              "children": [
+                                {
+                                  "type": "rectangle",
+                                  "cornerRadius": 6,
+                                  "id": "wUmtj",
+                                  "x": 18,
+                                  "y": 22,
+                                  "name": "Thumbnail block A 03",
+                                  "fill": "$ink",
+                                  "width": 110,
+                                  "height": 80
+                                },
+                                {
+                                  "type": "rectangle",
+                                  "cornerRadius": 6,
+                                  "id": "NqD0H",
+                                  "x": 146,
+                                  "y": 46,
+                                  "name": "Thumbnail block B 03",
+                                  "fill": "#FFFFFF99",
+                                  "width": 140,
+                                  "height": 56
+                                },
+                                {
+                                  "type": "ellipse",
+                                  "id": "QpQM7",
+                                  "x": 58,
+                                  "y": 18,
+                                  "name": "Thumbnail orbit 03",
+                                  "width": 205,
+                                  "height": 100,
+                                  "stroke": "#1C191733",
+                                  "strokeWidth": 1
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "vWuID",
+                              "name": "Project meta 03",
+                              "width": "fill_container",
+                              "layout": "vertical",
+                              "gap": 6,
+                              "children": [
+                                {
+                                  "type": "frame",
+                                  "id": "E3ZNEW",
+                                  "name": "Project title row 03",
+                                  "width": "fill_container",
+                                  "height": 20,
+                                  "justifyContent": "space_between",
+                                  "alignItems": "center",
+                                  "children": [
+                                    {
+                                      "type": "text",
+                                      "id": "I0YQYN",
+                                      "name": "Project title 03",
+                                      "fill": "$ink",
+                                      "content": "人物与风格测试",
+                                      "fontFamily": "$font-body",
+                                      "fontSize": 14,
+                                      "fontWeight": "700"
+                                    },
+                                    {
+                                      "type": "icon",
+                                      "id": "G5xMl",
+                                      "name": "Project menu 03",
+                                      "width": 16,
+                                      "height": 16,
+                                      "icon": "ellipsis",
+                                      "library": "lucide",
+                                      "fill": "$muted"
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "OL9eq",
+                                  "name": "Project date 03",
+                                  "fill": "$muted",
+                                  "content": "06 / 14 / 2026  ·  8 nodes",
+                                  "fontFamily": "$font-body",
+                                  "fontSize": 11,
+                                  "fontWeight": "normal"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "E7Y6Mn",
+                              "name": "Project footer 03",
+                              "width": "fill_container",
+                              "height": 18,
+                              "justifyContent": "space_between",
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "iMUZp",
+                                  "name": "Project status 03",
+                                  "fill": "$muted",
+                                  "content": "已保存",
+                                  "fontFamily": "$font-body",
+                                  "fontSize": 10,
+                                  "fontWeight": "700"
+                                },
+                                {
+                                  "type": "icon",
+                                  "id": "ddrXp",
+                                  "name": "Project open icon 03",
+                                  "width": 14,
+                                  "height": 14,
+                                  "icon": "arrow-up-right",
+                                  "library": "lucide",
+                                  "fill": "$muted"
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "FnJwy",
+      "x": 1640,
+      "y": 80,
+      "name": "02 / New canvas quick-start",
+      "clip": true,
+      "width": 1440,
+      "height": 1024,
+      "fill": "$dark",
+      "layout": "none",
+      "children": [
+        {
+          "type": "text",
+          "id": "C5c7w",
+          "x": 56,
+          "y": 42,
+          "name": "State screen label",
+          "fill": "#BBAFA4",
+          "content": "CANVAS LIBRARY / NEW WORKSPACE",
+          "fontFamily": "$font-body",
+          "fontSize": 11,
+          "fontWeight": "700",
+          "letterSpacing": 1.4
+        },
+        {
+          "type": "text",
+          "id": "f71oT",
+          "x": 56,
+          "y": 78,
+          "name": "State screen background title",
+          "fill": "#FFFDF8",
+          "content": "继续创作",
+          "fontFamily": "$font-body",
+          "fontSize": 34,
+          "fontWeight": "700"
+        },
+        {
+          "type": "rectangle",
+          "cornerRadius": 18,
+          "id": "InVD9",
+          "x": 56,
+          "y": 154,
+          "name": "State screen background plane",
+          "fill": "#24201E",
+          "width": 1328,
+          "height": 700
+        },
+        {
+          "type": "frame",
+          "id": "c6juB",
+          "x": 330,
+          "y": 132,
+          "name": "New canvas modal",
+          "width": 780,
+          "height": 760,
+          "fill": "$surface",
+          "cornerRadius": 20,
+          "stroke": "$line",
+          "strokeWidth": 1,
+          "effect": {
+            "type": "shadow",
+            "shadowType": "outer",
+            "color": "#00000066",
+            "offset": {
+              "x": 0,
+              "y": 18
+            },
+            "blur": 40
+          },
+          "layout": "vertical",
+          "gap": 18,
+          "padding": 32,
+          "children": [
+            {
+              "type": "frame",
+              "id": "II1JY",
+              "name": "New canvas modal header",
+              "width": "fill_container",
+              "height": 58,
+              "justifyContent": "space_between",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "sSgj4",
+                  "name": "New canvas modal copy",
+                  "layout": "vertical",
+                  "gap": 7,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "wr3KI",
+                      "name": "New canvas modal eyebrow",
+                      "fill": "$accent",
+                      "content": "START A NEW WORKSPACE",
+                      "fontFamily": "$font-body",
+                      "fontSize": 10,
+                      "fontWeight": "700",
+                      "letterSpacing": 1.4
+                    },
+                    {
+                      "type": "text",
+                      "id": "AqlQR",
+                      "name": "New canvas modal title",
+                      "fill": "$ink",
+                      "content": "新建画布",
+                      "fontFamily": "$font-body",
+                      "fontSize": 26,
+                      "fontWeight": "700"
+                    }
+                  ]
+                },
+                {
+                  "type": "icon",
+                  "id": "yMpKi",
+                  "name": "New canvas modal close",
+                  "width": 18,
+                  "height": 18,
+                  "icon": "x",
+                  "library": "lucide",
+                  "fill": "$muted"
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "id": "AD9SR",
+              "name": "New canvas modal description",
+              "fill": "$muted",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "先选择一个入口，之后可以在同一张无限画布里继续组合图片、文字、导演笔记和生成结果。",
+              "lineHeight": 1.5,
+              "fontFamily": "$font-body",
+              "fontSize": 13,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "ipfMW",
+              "name": "New canvas options",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 10,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "fHCUu",
+                  "name": "New canvas option 01",
+                  "width": "fill_container",
+                  "height": 82,
+                  "fill": "$accent-soft",
+                  "cornerRadius": 12,
+                  "stroke": "$accent",
+                  "strokeWidth": 1,
+                  "gap": 14,
+                  "padding": [
+                    0,
+                    16
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "p2LP6",
+                      "name": "New canvas option icon box 01",
+                      "width": 38,
+                      "height": 38,
+                      "fill": "#FFFFFF88",
+                      "cornerRadius": 11,
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "u990lW",
+                          "name": "New canvas option icon 01",
+                          "width": 18,
+                          "height": 18,
+                          "icon": "file-plus",
+                          "library": "lucide",
+                          "fill": "$accent"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "aqRLf",
+                      "name": "New canvas option copy 01",
+                      "layout": "vertical",
+                      "gap": 4,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "GMAC0",
+                          "name": "New canvas option title 01",
+                          "fill": "$ink",
+                          "content": "空白画布",
+                          "fontFamily": "$font-body",
+                          "fontSize": 14,
+                          "fontWeight": "700"
+                        },
+                        {
+                          "type": "text",
+                          "id": "FCohe",
+                          "name": "New canvas option description 01",
+                          "fill": "$muted",
+                          "content": "从一张干净的工作区开始",
+                          "fontFamily": "$font-body",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "icon",
+                      "id": "DoFaS",
+                      "name": "New canvas option arrow 01",
+                      "width": 16,
+                      "height": 16,
+                      "icon": "arrow-up-right",
+                      "library": "lucide",
+                      "fill": "$accent"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "o2K8vu",
+                  "name": "New canvas option 02",
+                  "width": "fill_container",
+                  "height": 82,
+                  "fill": "$bg",
+                  "cornerRadius": 12,
+                  "stroke": "$line",
+                  "strokeWidth": 1,
+                  "gap": 14,
+                  "padding": [
+                    0,
+                    16
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "Oaj2E",
+                      "name": "New canvas option icon box 02",
+                      "width": 38,
+                      "height": 38,
+                      "fill": "$panel",
+                      "cornerRadius": 11,
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "H0ymc",
+                          "name": "New canvas option icon 02",
+                          "width": 18,
+                          "height": 18,
+                          "icon": "folder-open",
+                          "library": "lucide",
+                          "fill": "$ink"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "RryZk",
+                      "name": "New canvas option copy 02",
+                      "layout": "vertical",
+                      "gap": 4,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "Ci3n8",
+                          "name": "New canvas option title 02",
+                          "fill": "$ink",
+                          "content": "导入参考",
+                          "fontFamily": "$font-body",
+                          "fontSize": 14,
+                          "fontWeight": "700"
+                        },
+                        {
+                          "type": "text",
+                          "id": "wdkaW",
+                          "name": "New canvas option description 02",
+                          "fill": "$muted",
+                          "content": "带入已有图片、文本或画布包",
+                          "fontFamily": "$font-body",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "icon",
+                      "id": "aDGCY",
+                      "name": "New canvas option arrow 02",
+                      "width": 16,
+                      "height": 16,
+                      "icon": "arrow-up-right",
+                      "library": "lucide",
+                      "fill": "$ink"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "pOZOM",
+                  "name": "New canvas option 03",
+                  "width": "fill_container",
+                  "height": 82,
+                  "fill": "$bg",
+                  "cornerRadius": 12,
+                  "stroke": "$line",
+                  "strokeWidth": 1,
+                  "gap": 14,
+                  "padding": [
+                    0,
+                    16
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "vKqMt",
+                      "name": "New canvas option icon box 03",
+                      "width": 38,
+                      "height": 38,
+                      "fill": "$panel",
+                      "cornerRadius": 11,
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "mmXCT",
+                          "name": "New canvas option icon 03",
+                          "width": 18,
+                          "height": 18,
+                          "icon": "wand-sparkles",
+                          "library": "lucide",
+                          "fill": "$ink"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "QAEv6",
+                      "name": "New canvas option copy 03",
+                      "layout": "vertical",
+                      "gap": 4,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "dlw1r",
+                          "name": "New canvas option title 03",
+                          "fill": "$ink",
+                          "content": "提示词起步",
+                          "fontFamily": "$font-body",
+                          "fontSize": 14,
+                          "fontWeight": "700"
+                        },
+                        {
+                          "type": "text",
+                          "id": "lVQai",
+                          "name": "New canvas option description 03",
+                          "fill": "$muted",
+                          "content": "先写一句话，再把结果放到画布上",
+                          "fontFamily": "$font-body",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "icon",
+                      "id": "e3TgP",
+                      "name": "New canvas option arrow 03",
+                      "width": 16,
+                      "height": 16,
+                      "icon": "arrow-up-right",
+                      "library": "lucide",
+                      "fill": "$ink"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "L9a9Q",
+              "name": "New canvas modal footer",
+              "width": "fill_container",
+              "height": 54,
+              "justifyContent": "space_between",
+              "alignItems": "end",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "zir2Z",
+                  "name": "New canvas modal footer note",
+                  "fill": "$muted",
+                  "content": "之后仍可在 Config 中补充模型与接口设置。",
+                  "fontFamily": "$font-body",
+                  "fontSize": 11,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "h67sM",
+                  "name": "New canvas cancel",
+                  "width": 74,
+                  "height": 34,
+                  "fill": "$bg",
+                  "cornerRadius": 8,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "IPdL7",
+                      "name": "New canvas cancel label",
+                      "fill": "$ink",
+                      "content": "取消",
+                      "fontFamily": "$font-body",
+                      "fontSize": 12,
+                      "fontWeight": "600"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "variables": {
+    "bg": {
+      "type": "color",
+      "value": "#F3F1EC"
+    },
+    "surface": {
+      "type": "color",
+      "value": "#FBFAF7"
+    },
+    "panel": {
+      "type": "color",
+      "value": "#FFFFFF"
+    },
+    "ink": {
+      "type": "color",
+      "value": "#1C1917"
+    },
+    "muted": {
+      "type": "color",
+      "value": "#78716C"
+    },
+    "line": {
+      "type": "color",
+      "value": "#DFDCD3"
+    },
+    "accent": {
+      "type": "color",
+      "value": "#E5543F"
+    },
+    "accent-soft": {
+      "type": "color",
+      "value": "#F4D8D2"
+    },
+    "dark": {
+      "type": "color",
+      "value": "#171514"
+    },
+    "dark-panel": {
+      "type": "color",
+      "value": "#24201E"
+    },
+    "gold": {
+      "type": "color",
+      "value": "#D8B56D"
+    },
+    "font-body": {
+      "type": "string",
+      "value": "Inter"
+    }
+  },
+  "fileToken": "6fddb7cc-bf71-4ee3-9948-1b92e5f33f29"
+}
